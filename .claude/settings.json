@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(php artisan *)",
+      "Bash(php --version)",
+      "Bash(where php *)",
+      "Bash(C:\\\\laragon\\\\bin\\\\php\\\\php-8.5.1\\\\php.exe --version)"
+    ]
+  }
+}
