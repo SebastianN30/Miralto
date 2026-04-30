@@ -4,7 +4,16 @@
       "Bash(php artisan *)",
       "Bash(php --version)",
       "Bash(where php *)",
-      "Bash(C:\\\\laragon\\\\bin\\\\php\\\\php-8.5.1\\\\php.exe --version)"
+      "Bash(C:\\\\laragon\\\\bin\\\\php\\\\php-8.5.1\\\\php.exe --version)",
+      "Bash(\"/c/laragon/bin/php/php-8.5.1/php.exe\" --version)",
+      "Bash(\"/c/laragon/bin/php/php-8.5.1/php.exe\" artisan *)",
+      "Bash(\"/c/laragon/bin/php/php-8.5.1/php.exe\" vendor/bin/pint --dirty --format agent)",
+      "Read(//c/Users/User/.claude/projects/c--laragon-www-Miralto/**)",
+      "Bash(npm run *)",
+      "Bash(/c/laragon/bin/php/php-8.5.1/php.exe artisan *)",
+      "Bash(vendor/bin/pint --dirty --format agent)",
+      "Bash(/c/laragon/bin/php/php-8.5.1/php.exe vendor/bin/pint --dirty --format agent)",
+      "Bash(npm install *)"
     ]
   }
 }

@@ -14,8 +14,8 @@ import { request } from '@/routes/password';
 
 defineOptions({
     layout: {
-        title: 'Log in to your account',
-        description: 'Enter your email and password below to log in',
+        title: 'Bienvenido de vuelta',
+        description: 'Ingresa tus credenciales para acceder al sistema',
     },
 });
 
@@ -27,11 +27,11 @@ defineProps<{
 </script>
 
 <template>
-    <Head title="Log in" />
+    <Head title="Iniciar sesión" />
 
     <div
         v-if="status"
-        class="mb-4 text-center text-sm font-medium text-green-600"
+        class="mb-4 rounded-md bg-green-50 px-3 py-2 text-center text-sm font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400"
     >
         {{ status }}
     </div>
@@ -40,72 +40,68 @@ defineProps<{
         v-bind="store.form()"
         :reset-on-success="['password']"
         v-slot="{ errors, processing }"
-        class="flex flex-col gap-6"
+        class="flex flex-col gap-5"
     >
-        <div class="grid gap-6">
-            <div class="grid gap-2">
-                <Label for="email">Email address</Label>
-                <Input
-                    id="email"
-                    type="email"
-                    name="email"
-                    required
-                    autofocus
-                    :tabindex="1"
-                    autocomplete="email"
-                    placeholder="email@example.com"
-                />
-                <InputError :message="errors.email" />
-            </div>
-
-            <div class="grid gap-2">
-                <div class="flex items-center justify-between">
-                    <Label for="password">Password</Label>
-                    <TextLink
-                        v-if="canResetPassword"
-                        :href="request()"
-                        class="text-sm"
-                        :tabindex="5"
-                    >
-                        Forgot password?
-                    </TextLink>
-                </div>
-                <PasswordInput
-                    id="password"
-                    name="password"
-                    required
-                    :tabindex="2"
-                    autocomplete="current-password"
-                    placeholder="Password"
-                />
-                <InputError :message="errors.password" />
-            </div>
-
-            <div class="flex items-center justify-between">
-                <Label for="remember" class="flex items-center space-x-3">
-                    <Checkbox id="remember" name="remember" :tabindex="3" />
-                    <span>Remember me</span>
-                </Label>
-            </div>
-
-            <Button
-                type="submit"
-                class="mt-4 w-full"
-                :tabindex="4"
-                :disabled="processing"
-                data-test="login-button"
-            >
-                <Spinner v-if="processing" />
-                Log in
-            </Button>
+        <div class="grid gap-2">
+            <Label for="email">Correo electrónico</Label>
+            <Input
+                id="email"
+                type="email"
+                name="email"
+                required
+                autofocus
+                :tabindex="1"
+                autocomplete="email"
+                placeholder="usuario@miralto.com"
+            />
+            <InputError :message="errors.email" />
         </div>
+
+        <div class="grid gap-2">
+            <div class="flex items-center justify-between">
+                <Label for="password">Contraseña</Label>
+                <TextLink
+                    v-if="canResetPassword"
+                    :href="request()"
+                    class="text-xs text-miralto-verde hover:underline"
+                    :tabindex="5"
+                >
+                    ¿Olvidaste tu contraseña?
+                </TextLink>
+            </div>
+            <PasswordInput
+                id="password"
+                name="password"
+                required
+                :tabindex="2"
+                autocomplete="current-password"
+                placeholder="••••••••"
+            />
+            <InputError :message="errors.password" />
+        </div>
+
+        <Label for="remember" class="flex items-center gap-2.5 text-sm font-normal text-muted-foreground">
+            <Checkbox id="remember" name="remember" :tabindex="3" />
+            <span>Mantener sesión iniciada</span>
+        </Label>
+
+        <Button
+            type="submit"
+            class="mt-2 w-full bg-miralto-verde text-white hover:bg-miralto-verde/90"
+            :tabindex="4"
+            :disabled="processing"
+            data-test="login-button"
+        >
+            <Spinner v-if="processing" />
+            {{ processing ? 'Ingresando…' : 'Ingresar' }}
+        </Button>
 
         <div
             class="text-center text-sm text-muted-foreground"
             v-if="canRegister"
         >
-            Don't have an account?
-            <TextLink :href="register()" :tabindex="5">Sign up</TextLink>
+            ¿No tienes cuenta?
+            <TextLink :href="register()" :tabindex="5" class="text-miralto-verde">Regístrate</TextLink>
         </div>
     </Form>
 </template>

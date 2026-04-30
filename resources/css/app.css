@@ -89,6 +89,26 @@
     }
 }
 
+/* =====================================================
+   Miralto – Paleta Campestre
+   ===================================================== */
+:root {
+    --miralto-verde: 45 85 45;
+    --miralto-beige: 240 235 210;
+    --miralto-marron: 120 70 45;
+    --miralto-blanco: 250 245 235;
+}
+
+@theme inline {
+    --color-miralto-verde: rgb(var(--miralto-verde));
+    --color-miralto-beige: rgb(var(--miralto-beige));
+    --color-miralto-marron: rgb(var(--miralto-marron));
+    --color-miralto-blanco: rgb(var(--miralto-blanco));
+}
+
+/* =====================================================
+   Sistema de diseño base
+   ===================================================== */
 :root {
     --background: hsl(0 0% 100%);
     --foreground: hsl(0 0% 3.9%);

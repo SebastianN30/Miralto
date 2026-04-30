@@ -188,3 +188,487 @@ Vue components must have a single root element.
 - IMPORTANT: Activate `inertia-vue-development` when working with Inertia Vue client-side patterns.
 
 </laravel-boost-guidelines>
+
+# Miralto – Restaurante Campestre
+
+## Descripción del proyecto
+
+Sistema de gestión interna para el restaurante campestre **Miralto** (Colombia). Permite registrar y administrar órdenes de clientes, productos del menú y usuarios del sistema. El diseño visual sigue una estética rural/familiar colombiana.
+
+**Stack:**
+- Backend: Laravel 13 + PHP 8.5 + Fortify (autenticación)
+- Frontend: Vue 3 + Inertia.js v3 + TypeScript
+- Estilos: Tailwind CSS v4 con paleta personalizada
+- Build: Vite con `@laravel/vite-plugin-wayfinder` (genera tipos TS desde rutas Laravel)
+- Tests: PHPUnit 12
+
+---
+
+## Ejecutar PHP
+
+Siempre usar `/c/laragon/bin/php/php-8.5.1/php.exe` para comandos artisan. La versión 8.1 del PATH del sistema no es compatible con las dependencias del proyecto.
+
+```bash
+/c/laragon/bin/php/php-8.5.1/php.exe artisan migrate
+/c/laragon/bin/php/php-8.5.1/php.exe artisan test --compact
+vendor/bin/pint --dirty --format agent  # formatear PHP modificado
+```
+
+---
+
+## Paleta de colores
+
+Definida en `resources/css/app.css` con `@theme inline`. Usar siempre los tokens Tailwind:
+
+| Token Tailwind | CSS var | RGB | Uso |
+|---|---|---|---|
+| `bg-miralto-verde` / `text-miralto-verde` | `--color-miralto-verde` | (45, 85, 45) | Acciones primarias, botones CTA, badges activos |
+| `bg-miralto-beige` / `text-miralto-beige` | `--color-miralto-beige` | (240, 235, 210) | Fondo suave de página, secciones agrupadas |
+| `bg-miralto-marron` / `text-miralto-marron` | `--color-miralto-marron` | (120, 70, 45) | Acentos, separadores, pago dividido |
+| `bg-miralto-blanco` / `text-miralto-blanco` | `--color-miralto-blanco` | (250, 245, 235) | Cards, áreas de respiro |
+
+---
+
+## Wayfinder – generación de rutas TypeScript
+
+Las rutas y acciones de controladores se generan automáticamente en:
+- `resources/js/actions/App/Http/Controllers/` → acciones de controladores (CRUD)
+- `resources/js/routes/` → rutas nombradas
+
+Importar siempre desde estas ubicaciones. Nunca hardcodear URLs.
+
+```ts
+import * as OrderController from '@/actions/App/Http/Controllers/OrderController';
+import { index, create, show } from '@/routes/orders';
+
+// Uso
+OrderController.store.url()
+OrderController.update.url({ order: 1 })
+index()   // /orders
+show({ order: 1 })  // /orders/1
+```
+
+---
+
+## Estructura de base de datos
+
+### `users`
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | bigIncrements | PK |
+| `name` | string | |
+| `email` | string unique | |
+| `password` | hashed | |
+| `role` | enum(admin, employee) | default: employee |
+| `is_active` | boolean | default: true |
+| `two_factor_*` | columns | Fortify 2FA |
+| `remember_token` | string | |
+| `timestamps` | | |
+
+**Modelo `User`:** `isAdmin()`, `isEmployee()`, relación `orders()` hasMany.
+**Factory states:** `admin()`, `inactive()`, `withTwoFactor()`
+
+---
+
+### `categories`
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | bigIncrements | PK |
+| `name` | string | |
+| `description` | text nullable | |
+| `is_active` | boolean | default: true |
+| `timestamps` | | |
+
+**Modelo `Category`:** relaciones `products()` hasMany, `activeProducts()` hasMany (filtrada por `is_active=true`).
+
+---
+
+### `products`
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | bigIncrements | PK |
+| `category_id` | FK nullable | → categories, nullOnDelete |
+| `name` | string | |
+| `description` | text nullable | |
+| `price` | decimal(10,2) | precio de venta |
+| `cost` | decimal(10,2) nullable | costo de producción |
+| `stock` | integer nullable | |
+| `is_active` | boolean | default: true |
+| `timestamps` | | |
+| `deleted_at` | softDeletes | |
+
+**Modelo `Product`:** `marginPercentage()` calcula `(price - cost) / price * 100`. `ingredientCost()` suma `cost_per_unit × quantity` de todos los insumos vinculados. Cuando se guardan insumos, el campo `cost` se recalcula automáticamente. Relaciones `category()` belongsTo, `orderItems()` hasMany, `ingredients()` belongsToMany (pivot: `ProductIngredient`, columna extra: `quantity`). El campo `printer_id` (FK nullable → `printers`) determina a qué impresora se envía el producto en el módulo del mesero (futuro). Índices en `category_id` e `is_active`.
+
+---
+
+### `printers`
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | bigIncrements | PK |
+| `name` | string | nombre de la impresora |
+| `description` | string nullable | |
+| `ip_address` | string nullable | IP en la red local |
+| `is_active` | boolean | default: true |
+| `timestamps` | | |
+
+Tabla preparada para el módulo de meseros (Fase futura). Los productos la referencian con `printer_id` nullable — cuando sea null, se imprime en la impresora por defecto.
+
+---
+
+### `ingredients`
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | bigIncrements | PK |
+| `name` | string | nombre del insumo |
+| `unit` | string(50) | unidad de medida (kg, g, litros, ml, unidad, porción, taza, cucharada, cucharadita) |
+| `cost_per_unit` | decimal(10,4) | costo por unidad de medida |
+| `is_active` | boolean | default: true |
+| `timestamps` | | |
+
+**Modelo `Ingredient`:** relación `products()` belongsToMany.
+**Factory:** `inactive()` state.
+
+---
+
+### `product_ingredients` (pivot)
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | bigIncrements | PK |
+| `product_id` | FK | → products, cascadeOnDelete |
+| `ingredient_id` | FK | → ingredients, restrictOnDelete |
+| `quantity` | decimal(10,3) | cantidad del insumo en el producto |
+| `timestamps` | | |
+| unique | (product_id, ingredient_id) | |
+
+**Modelo `ProductIngredient`:** extiende `Pivot` (no `Model`), `$incrementing = true`.
+
+---
+
+### `cash_registers` (caja del día)
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | bigIncrements | PK |
+| `user_id` | FK | → users, restrictOnDelete (quien abrió la caja) |
+| `opened_at` | dateTime | momento de apertura |
+| `closed_at` | dateTime nullable | momento de cierre |
+| `opening_amount` | decimal(12,2) | efectivo inicial |
+| `closing_amount` | decimal(12,2) nullable | efectivo contado al cierre |
+| `opening_notes` | text nullable | |
+| `closing_notes` | text nullable | |
+| `status` | enum(open, closed) | default: open |
+| `timestamps` | | |
+| índice | (status, opened_at) | |
+
+**Modelo `CashRegister`:**
+- `expectedCash()` → `opening_amount + cashIn − cashOut` (esperado en caja en este momento)
+- `difference()` → `closing_amount − expectedCash()` (sólo después de cerrar)
+- `totalCashIn()` / `totalCashOut()` → suma de movimientos en efectivo
+- `totalSales()`, `totalIncome()`, `totalExpense()`, `totalRefund()`
+- `isOpen()` / `isClosed()`
+- Scope: `open()` filtra `status = 'open'`
+- Relaciones: `user()`, `movements()` hasMany, `orders()` hasMany
+
+---
+
+### `cash_movements`
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | bigIncrements | PK |
+| `cash_register_id` | FK | → cash_registers, cascadeOnDelete |
+| `user_id` | FK nullable | → users, nullOnDelete |
+| `order_id` | FK nullable | → orders, nullOnDelete (sólo en ventas/devoluciones) |
+| `type` | enum(income, expense, sale, refund) | |
+| `payment_method` | enum(cash, transfer, card) nullable | |
+| `amount` | decimal(12,2) | |
+| `description` | string | |
+| `timestamps` | | |
+| índices | (cash_register_id, type), (order_id) | |
+
+**Tipos de movimiento:**
+- `income` / `expense` → manuales (creados por usuario desde la UI)
+- `sale` / `refund` → automáticos (creados por `OrderObserver` cuando una orden se paga o se cancela)
+
+**Modelo `CashMovement`:** `isManual()` retorna `true` si es income/expense; `isAutomatic()` para sale/refund (los automáticos no se pueden eliminar manualmente).
+
+---
+
+### `order_logs` (auditoría de órdenes)
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | bigIncrements | PK |
+| `order_id` | FK | → orders, cascadeOnDelete |
+| `user_id` | FK nullable | → users, nullOnDelete |
+| `action` | string | created / status_changed / payment_updated / deleted |
+| `description` | string | texto legible |
+| `changes` | JSON nullable | `{field: {from: x, to: y}}` |
+| `timestamps` | | |
+| índice | (order_id, created_at) | |
+
+Generado automáticamente por el `OrderObserver` (PHP attribute `#[ObservedBy]` sobre el modelo `Order`).
+
+---
+
+### `orders`
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | bigIncrements | PK |
+| `user_id` | FK | → users, restrictOnDelete |
+| `cash_register_id` | FK nullable | → cash_registers, nullOnDelete (caja activa al crearse) |
+| `total` | decimal(10,2) | calculado desde items |
+| `status` | enum(pending, paid, cancelled) | default: pending |
+| `payment_method` | enum(cash, transfer, card) nullable | método principal |
+| `payment_amount_1` | decimal(10,2) nullable | monto método principal (pago dividido) |
+| `payment_method_2` | enum(cash, transfer, card) nullable | segundo método (pago dividido) |
+| `payment_amount_2` | decimal(10,2) nullable | monto segundo método |
+| `notes` | text nullable | observaciones |
+| `timestamps` | | |
+
+**Modelo `Order`:**
+- `recalculateTotal()` → suma `subtotal` de los items y guarda
+- `hasSplitPayment()` → `payment_method_2 !== null`
+- `totalPaid()` → suma `payment_amount_1 + payment_amount_2`
+- `remainingBalance()` → diferencia entre total y lo pagado
+- Relaciones: `user()` belongsTo, `cashRegister()` belongsTo, `items()` hasMany, `logs()` hasMany (latest), `cashMovements()` hasMany.
+- Atributo `#[ObservedBy([OrderObserver::class])]` registra el observer (audit log + auto cash movements).
+- Índices en `user_id`, `cash_register_id`, `status`, `created_at`.
+
+---
+
+### `order_items`
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | bigIncrements | PK |
+| `order_id` | FK | → orders, cascadeOnDelete |
+| `product_id` | FK | → products, restrictOnDelete |
+| `quantity` | unsignedInteger | |
+| `price` | decimal(10,2) | **snapshot** del precio al momento de venta |
+| `subtotal` | decimal(10,2) | `price * quantity` |
+| `timestamps` | | |
+
+**Modelo `OrderItem`:** relaciones `order()` belongsTo, `product()` belongsTo. Índices en `order_id` y `product_id`.
+
+---
+
+## Módulo de Caja – comportamiento clave
+
+### Flujo de la caja del día
+1. Usuario abre la caja desde `/cash` con un monto de apertura → se crea `CashRegister` con `status = 'open'`.
+2. Mientras está abierta:
+   - Las **órdenes nuevas** se asocian automáticamente al `cash_register_id` de la sesión activa (`OrderController::store()`).
+   - Cuando una orden cambia a `paid` → el `OrderObserver` crea movimientos `sale` (uno o dos según pago dividido).
+   - Cuando una orden pagada se cancela → se crea un movimiento `refund` que revierte la venta.
+   - El usuario puede registrar **ingresos** o **egresos** manuales (compra de gas, propinas, etc.).
+3. Al cerrar la caja, el usuario declara cuánto efectivo cuenta físicamente. El sistema calcula la **diferencia** vs el efectivo esperado.
+4. Solo puede haber **una caja abierta a la vez** (validado en `CashRegisterController::store()`).
+
+### Cálculos clave (en el modelo `CashRegister`)
+- **Efectivo esperado:** `opening_amount + (ventas/ingresos en efectivo) − (egresos/devoluciones en efectivo)`
+- **Diferencia:** `closing_amount − expectedCash()` — se evalúa solo al cerrar
+- **Regla de negocio:** la caja física **solo refleja efectivo**. Las ventas en `transfer`/`card` se muestran en una card aparte ("Ventas por otros métodos") y NO entran en el cálculo de efectivo esperado.
+- Métodos del modelo:
+  - `totalSalesCash()` — solo ventas en efectivo (lo que entra a la caja)
+  - `totalSalesOther()` — transferencia + tarjeta sumadas (informativo)
+  - `salesByPaymentMethod()` — desglose `{cash, transfer, card}`
+  - `totalSales()` — gran total (sumando todos los métodos, mantenido para reportes)
+
+### Permisos
+- **Eliminar movimientos manuales:** solo admin. No se pueden eliminar movimientos automáticos (`sale`, `refund`) ni movimientos de cajas cerradas.
+- **Cerrar caja:** cualquier usuario autenticado.
+
+---
+
+## Módulo de Auditoría de Órdenes (Observer)
+
+`App\Observers\OrderObserver` (registrado vía `#[ObservedBy]` en `Order`). Captura:
+
+| Evento | Acción |
+|---|---|
+| `created` | Crea `OrderLog` con action=`created` |
+| `updated` con cambio de `status` | Log `status_changed` con `{from, to}` en `changes` |
+| `updated` con cambio de pago (sin cambio de status) | Log `payment_updated` con campos modificados |
+| `deleted` | Log `deleted` |
+
+**Side effects en cambios de status:**
+- `→ paid`: crea `CashMovement` tipo `sale` (uno o dos en pago dividido) en la caja activa.
+- `paid → cancelled`: crea `CashMovement` tipo `refund` por el total.
+
+Si no hay caja abierta cuando se debería crear un movimiento automático, el observer simplemente lo omite (no falla).
+
+---
+
+## Módulo de Productos – comportamiento clave
+
+### CRUD completo
+- **Index:** filtros por búsqueda, categoría y estado (active/inactive/deleted). Muestra precio, costo, margen% y stock.
+- **Create/Edit:** formulario en dos columnas — izquierda (info básica + insumos), derecha (estado/stock + precios).
+- **Archivar (destroy):** soft delete — el producto sigue en la BD con `deleted_at`. Solo admins ven el botón.
+- **Restaurar (restore):** `POST /products/{id}/restore` — restaura productos archivados. Solo admins.
+
+### Constructor de insumos (ingredient builder)
+- El formulario recibe todos los insumos (`ingredients` prop) del servidor.
+- El usuario selecciona un insumo del dropdown → aparece una fila con campo de cantidad editable.
+- Cada fila muestra: nombre | unidad | cantidad | costo unitario × cantidad = subtotal.
+- El **costo total** se calcula reactivamente (`ingredientCost = sum(cost_per_unit × quantity)`).
+- Al guardar, `ProductController::syncIngredients()` hace `sync()` en la pivot y guarda `cost = ingredientCost()` en el producto.
+
+### Precio sugerido
+- Solo se muestra cuando hay insumos en el formulario.
+- Fórmula: `suggestedPrice = ingredientCost / (1 - margin / 100)`
+- El margen se ajusta con un slider (10%–90%, default 65%).
+- Botón "Aplicar precio sugerido" redondea al siguiente centenar y lo copia al campo de precio.
+
+### Nuevo insumo inline
+- Botón "Nuevo insumo" abre un `Dialog` (Reka UI) con campos: nombre, unidad, costo.
+- Se envía a `POST /ingredients` con `preserveState: true` para no perder el estado del formulario.
+- La respuesta incluye `flash.newIngredient` con el nuevo insumo; un `watch` en el componente lo auto-agrega a la lista de insumos del formulario.
+
+### Control de acceso
+- **Archivar/Restaurar:** solo `role = admin`. Backend: comprobación implícita en el controller. Frontend: `v-if="isAdmin"`.
+
+---
+
+## Módulo de Órdenes – comportamiento clave
+
+### Pago dividido
+Permite que una orden se pague con dos métodos distintos (ej. parte en efectivo, parte en transferencia).
+- `payment_method` + `payment_amount_1` = primer método
+- `payment_method_2` + `payment_amount_2` = segundo método
+- `payment_amount_2` se calcula como `total - payment_amount_1` en el frontend
+
+### Dividir orden (`/orders/{order}/split`)
+Mueve items (o parte de ellos) a una nueva orden pendiente.
+- Si la cantidad a separar iguala la cantidad total del item → el item se mueve completo
+- Si la cantidad es menor → se reduce la cantidad original y se crea un nuevo item en la nueva orden
+- Ambas órdenes recalculan su total al final
+
+### Control de acceso
+- **Eliminar orden:** solo usuarios con `role = 'admin'`. Backend: `abort(403)` si no es admin. Frontend: `v-if="isAdmin"` con `usePage().props.auth.user.role`.
+- El campo `role` está excluido del `#[Hidden]` del modelo, por lo que llega en las props de Inertia.
+
+---
+
+## Rutas web (`routes/web.php`)
+
+```
+GET    /                             → Welcome (público)
+GET    /dashboard                    → Dashboard (auth, verified)
+
+GET    /orders                       → OrderController@index
+GET    /orders/create                → OrderController@create
+POST   /orders                       → OrderController@store
+GET    /orders/{order}               → OrderController@show
+GET    /orders/{order}/edit          → OrderController@edit
+PATCH  /orders/{order}               → OrderController@update
+DELETE /orders/{order}               → OrderController@destroy (admin only)
+POST   /orders/{order}/split         → OrderController@split
+
+GET    /products                     → ProductController@index
+GET    /products/create              → ProductController@create
+POST   /products                     → ProductController@store
+GET    /products/{product}/edit      → ProductController@edit
+PATCH  /products/{product}           → ProductController@update
+DELETE /products/{product}           → ProductController@destroy (soft delete, admin only)
+POST   /products/{id}/restore        → ProductController@restore (admin only)
+
+POST   /ingredients                  → IngredientController@store
+PATCH  /ingredients/{ingredient}     → IngredientController@update
+DELETE /ingredients/{ingredient}     → IngredientController@destroy (desactiva)
+
+GET    /cash                         → CashRegisterController@index
+POST   /cash                         → CashRegisterController@store (abrir caja)
+GET    /cash/{cash}                  → CashRegisterController@show
+PATCH  /cash/{cash}/close            → CashRegisterController@close
+POST   /cash/{cash}/movements        → CashMovementController@store
+DELETE /cash/movements/{movement}    → CashMovementController@destroy (admin only, manual movs)
+```
+
+**Settings** (en `routes/settings.php`): profile, security (password + 2FA), appearance.
+
+---
+
+## Frontend – estructura Vue
+
+### Páginas (`resources/js/pages/`)
+```
+auth/           Login, Register, ForgotPassword, ResetPassword, ConfirmPassword, VerifyEmail, TwoFactorChallenge
+orders/
+  Index.vue     Lista con estadísticas (total, pendientes, pagadas, ingresos), filtros y paginación
+  Create.vue    Selector de productos por categoría + carrito + checkout con pago dividido
+  Show.vue      Detalle de orden, acciones rápidas (marcar pagado, cancelar), diálogo dividir orden
+  Edit.vue      Formulario edición de estado y pago (incluye pago dividido)
+products/
+  Index.vue     Lista con filtros (búsqueda, categoría, estado), stats (total/activos/inactivos/archivados), tabla con margen%
+  Create.vue    Formulario con constructor de insumos + panel de precio sugerido
+  Edit.vue      Igual que Create pero pre-cargado con datos del producto
+cash/
+  Index.vue     Historial de cajas + tarjeta de caja activa + Dialog para abrir nueva caja
+  Show.vue      Detalle de caja: stats (apertura/ventas/ingresos/egresos), resumen de efectivo, lista de movimientos con filtro, órdenes asociadas, Dialogs para nuevo movimiento y cerrar caja
+settings/       Profile, Security, Appearance
+Dashboard.vue
+Welcome.vue
+```
+
+### Layouts
+El layout principal se define automáticamente via `AppShell.vue`. Los breadcrumbs se configuran en cada página con:
+```ts
+defineOptions({
+    layout: {
+        breadcrumbs: [
+            { title: 'Órdenes', href: index() },
+            { title: 'Detalle de orden', href: '#' },
+        ],
+    },
+});
+```
+**Restricción:** `defineOptions` se hoist fuera del `setup()`, por lo que no puede referenciar `props`. Los títulos dinámicos (ej. `#${order.id}`) deben ir en `<Head title>` y en el `h1` de la página.
+
+### Tipos TypeScript (`resources/js/types/`)
+- `models.ts` → `Category`, `Ingredient`, `ProductIngredient`, `Product`, `OrderItem`, `Order`, `OrderStatus`, `PaymentMethod`, `OrderLog`, `OrderLogAction`, `CashRegister`, `CashRegisterStatus`, `CashMovement`, `CashMovementType`, `PaginatedData<T>`
+- `auth.ts` → `User` (incluye `role: 'admin' | 'employee'`, `is_active: boolean`)
+- `navigation.ts` → `BreadcrumbItem`, `NavItem`
+
+### Componentes UI (`resources/js/components/ui/`)
+Librería headless basada en Reka UI. Disponibles: `alert`, `avatar`, `badge`, `breadcrumb`, `button`, `card`, `checkbox`, `collapsible`, `dialog`, `dropdown-menu`, `input`, `input-otp`, `label`, `navigation-menu`, `select`, `separator`, `sheet`, `spinner`, `tabs`.
+
+---
+
+## Seeders de datos de prueba
+
+```bash
+/c/laragon/bin/php/php-8.5.1/php.exe artisan db:seed
+```
+
+| Seeder | Datos |
+|---|---|
+| `UsersSeeder` | admin@miralto.com, carlos@miralto.com, maria@miralto.com — todos con password `password` |
+| `CategoriesSeeder` | Entradas, Platos Fuertes, Sopas y Caldos, Parrilla, Bebidas, Postres |
+| `ProductsSeeder` | 21 productos colombianos campestres (Bandeja Paisa, Trucha, Patacones, etc.) |
+| `OrdersSeeder` | 20 órdenes de prueba con 1–5 items aleatorios por orden |
+
+---
+
+## Tests
+
+Ubicación: `tests/Feature/MiraltoModelsTest.php`
+
+Cubre (15 tests): creación de modelos, relaciones Eloquent, soft deletes en productos, `marginPercentage()`, `recalculateTotal()`, factory states de usuarios.
+
+```bash
+/c/laragon/bin/php/php-8.5.1/php.exe artisan test --compact tests/Feature/MiraltoModelsTest.php
+```
+
+---
+
+## Roadmap – fases futuras
+
+| Fase | Módulo | Estado |
+|---|---|---|
+| 1 | Arquitectura base (migraciones, modelos, seeders, tests) | ✅ Completo |
+| 1 | Módulo de órdenes (CRUD, pago dividido, dividir orden) | ✅ Completo |
+| 2 | Módulo de productos (CRUD, insumos, precio sugerido) | ✅ Completo |
+| 2 | Módulo de caja (apertura/cierre, movimientos, observer de órdenes) | ✅ Completo |
+| 3 | Dashboard con KPIs (ventas por día/usuario, top productos, márgenes) | Pendiente |
+| 3 | Gestión de categorías (CRUD UI) | Pendiente |
+| 4 | Mesas y meseros (asignación de órdenes) | Pendiente |
+| 5 | Reservas | Pendiente |
+| 6 | Nómina de empleados | Pendiente |
