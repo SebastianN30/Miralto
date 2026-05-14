@@ -59,6 +59,7 @@ export type OrderItem = {
     quantity: number;
     price: string;
     subtotal: string;
+    notes: string | null;
     created_at: string;
     updated_at: string;
     product?: Product;
@@ -71,6 +72,7 @@ export type Order = {
     id: number;
     user_id: number;
     cash_register_id: number | null;
+    table_name: string | null;
     total: string;
     status: OrderStatus;
     payment_method: PaymentMethod | null;

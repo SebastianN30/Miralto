@@ -414,6 +414,7 @@ Generado automáticamente por el `OrderObserver` (PHP attribute `#[ObservedBy]` 
 | `id` | bigIncrements | PK |
 | `user_id` | FK | → users, restrictOnDelete |
 | `cash_register_id` | FK nullable | → cash_registers, nullOnDelete (caja activa al crearse) |
+| `table_name` | string(100) nullable | nombre/número de mesa (modo mesero) |
 | `total` | decimal(10,2) | calculado desde items |
 | `status` | enum(pending, paid, cancelled) | default: pending |
 | `payment_method` | enum(cash, transfer, card) nullable | método principal |
@@ -443,9 +444,69 @@ Generado automáticamente por el `OrderObserver` (PHP attribute `#[ObservedBy]` 
 | `quantity` | unsignedInteger | |
 | `price` | decimal(10,2) | **snapshot** del precio al momento de venta |
 | `subtotal` | decimal(10,2) | `price * quantity` |
+| `notes` | string(500) nullable | nota del mesero por ítem (ej. "sin cebolla") |
 | `timestamps` | | |
 
 **Modelo `OrderItem`:** relaciones `order()` belongsTo, `product()` belongsTo. Índices en `order_id` y `product_id`.
+
+---
+
+## Módulo Mesero – `/waiter`
+
+Vista enfocada para meseros. **Layout dedicado** (`resources/js/layouts/WaiterLayout.vue`) — sin el sidebar admin, con tab bar fija abajo (Pedidos / Nuevo). Registrado en `app.ts` con la regla `name.startsWith('waiter/') → WaiterLayout`.
+
+### Permisos / scope
+- Solo expone pedidos. No hay acceso a productos, caja, dashboard ni configuración desde la vista del mesero.
+- Cualquier usuario autenticado puede acceder. (Restricción por rol queda como TODO si llega el caso.)
+- Desde el sidebar admin existe el link "Modo mesero" (icono `ConciergeBell`) que lleva a `/waiter`.
+
+### Comportamiento clave
+- **Crear pedido** (`/waiter/create`): formulario tipo POS con campo de **mesa** (texto libre, requerido), selector de productos por categoría, carrito sticky arriba. Cada ítem del carrito permite agregar una nota individual (ej. "sin cebolla", "término medio"). El pedido se guarda con `status = 'pending'`.
+- **Agregar productos** (`/waiter/{order}/items`, POST): el mesero **solo puede AGREGAR productos**, nunca quitar ni reducir. Si se equivoca, debe cancelarse el pedido completo desde administración.
+  - El backend valida `status = 'pending'` antes de aceptar nuevos ítems.
+  - Recalcula el total después de insertar.
+- **Ver pedido** (`/waiter/{order}`): los ítems se agrupan por `printer_id` del producto (cocina/bar/barra) en preparación para el módulo de impresión. Cuando `printer_id = null`, se agrupan bajo "Impresora por defecto".
+
+### Notas de pedido vs notas de ítem
+- **Nota de pedido** (`orders.notes`): observación general (ej. "para llevar").
+- **Nota de ítem** (`order_items.notes`): específica del producto (ej. "sin sal").
+
+### Layout / UX
+- Mobile-first: tab bar inferior fija con dos accesos (Pedidos / Nuevo pedido), header con logo y logout.
+- Botones grandes (`h-12`), grid de productos 2-3 columnas, feedback táctil con `active:scale-95`.
+- El carrito en `Create.vue` es sticky bajo el header para que sea siempre visible.
+
+---
+
+## Módulo Dashboard – `/dashboard`
+
+Controlador: `DashboardController` (single-action, `__invoke`). Renderiza `pages/Dashboard.vue` con cuatro bloques de información:
+
+### KPIs (top row)
+- `revenue_today` — ventas de hoy (status=paid)
+- `revenue_yesterday` — para calcular `change_vs_yesterday` (% diferencia)
+- `revenue_week` — ventas acumuladas desde el lunes
+- `orders_today` — total de órdenes del día (cualquier estado)
+- `avg_ticket` — promedio histórico de `total` en órdenes pagadas
+
+### Ventas de los últimos 14 días
+Array completo de 14 días (incluyendo días con `total = 0`) → renderizado como bar chart con `chart.js` + `vue-chartjs`. Permite ver tendencia y "huecos".
+
+### Proyección mensual
+- `current_revenue` — acumulado del mes actual
+- `daily_average` — `current_revenue / días_transcurridos`
+- `projection` — `daily_average × días_del_mes` (cierre estimado)
+- `last_month_revenue` + `vs_last_month_pct` — comparación con mes anterior
+- Renderizado como line chart con dos series: **Real** (sólido, hasta hoy) y **Proyección** (dashed, días futuros)
+
+### Top y Bottom productos
+- **Top:** join de `order_items` + `orders` filtrando `status=paid`, agrupado por producto, ordenado por `SUM(quantity) DESC`. Renderizado con barras horizontales de progreso (max-width = el más vendido).
+- **Bottom:** **left join** desde `products` para incluir productos con cero ventas. Filtrado a `is_active=true` y `deleted_at IS NULL`. Útil para detectar productos de bajo desempeño (los `0 unidades` se resaltan en rojo).
+
+### Stack visual
+- `chart.js` v4 + `vue-chartjs` v5 (instalados con `npm install chart.js vue-chartjs`).
+- Componentes registrados en el script setup: `BarElement`, `CategoryScale`, `LinearScale`, `LineElement`, `PointElement`, `Filler`, `Title`, `Tooltip`, `Legend`.
+- Colores tomados directos de la paleta Miralto: `rgb(45, 85, 45)` (verde) para datos reales, `rgb(120, 70, 45)` (marrón) para proyección.
 
 ---
 
@@ -550,8 +611,8 @@ Mueve items (o parte de ellos) a una nueva orden pendiente.
 ## Rutas web (`routes/web.php`)
 
 ```
-GET    /                             → Welcome (público)
-GET    /dashboard                    → Dashboard (auth, verified)
+GET    /                             → redirect → dashboard si auth, login si no
+GET    /dashboard                    → DashboardController (auth, verified, single-action __invoke)
 
 GET    /orders                       → OrderController@index
 GET    /orders/create                → OrderController@create
@@ -580,6 +641,12 @@ GET    /cash/{cash}                  → CashRegisterController@show
 PATCH  /cash/{cash}/close            → CashRegisterController@close
 POST   /cash/{cash}/movements        → CashMovementController@store
 DELETE /cash/movements/{movement}    → CashMovementController@destroy (admin only, manual movs)
+
+GET    /waiter                       → WaiterController@index (lista de pedidos del día)
+GET    /waiter/create                → WaiterController@create
+POST   /waiter                       → WaiterController@store
+GET    /waiter/{order}               → WaiterController@show (items agrupados por printer_id)
+POST   /waiter/{order}/items         → WaiterController@addItems (solo agregar, nunca quitar)
 ```
 
 **Settings** (en `routes/settings.php`): profile, security (password + 2FA), appearance.
@@ -603,13 +670,24 @@ products/
 cash/
   Index.vue     Historial de cajas + tarjeta de caja activa + Dialog para abrir nueva caja
   Show.vue      Detalle de caja: stats (apertura/ventas/ingresos/egresos), resumen de efectivo, lista de movimientos con filtro, órdenes asociadas, Dialogs para nuevo movimiento y cerrar caja
+waiter/
+  Index.vue     Lista de pedidos del día (pendientes + pagados), botón "Nuevo"
+  Create.vue    POS mobile-first: mesa + categorías + grid productos + carrito sticky con notas por ítem
+  Show.vue      Detalle del pedido con items agrupados por impresora + Dialog para agregar más productos
 settings/       Profile, Security, Appearance
-Dashboard.vue
+Dashboard.vue   KPIs + bar chart 14 días + line chart proyección + top/bottom productos (chart.js)
 Welcome.vue
 ```
 
 ### Layouts
-El layout principal se define automáticamente via `AppShell.vue`. Los breadcrumbs se configuran en cada página con:
+Asignación automática por nombre de página en `resources/js/app.ts`:
+- `Welcome` → sin layout
+- `auth/*` → `AuthLayout` (split panel con branding Miralto)
+- `waiter/*` → `WaiterLayout` (mobile-first, tab bar inferior, sin sidebar admin)
+- `settings/*` → `AppLayout` + `SettingsLayout`
+- todo lo demás → `AppLayout` (sidebar admin + AppSidebarHeader con breadcrumbs)
+
+Los breadcrumbs se configuran en cada página con:
 ```ts
 defineOptions({
     layout: {
@@ -667,8 +745,10 @@ Cubre (15 tests): creación de modelos, relaciones Eloquent, soft deletes en pro
 | 1 | Módulo de órdenes (CRUD, pago dividido, dividir orden) | ✅ Completo |
 | 2 | Módulo de productos (CRUD, insumos, precio sugerido) | ✅ Completo |
 | 2 | Módulo de caja (apertura/cierre, movimientos, observer de órdenes) | ✅ Completo |
-| 3 | Dashboard con KPIs (ventas por día/usuario, top productos, márgenes) | Pendiente |
+| 3 | Dashboard con KPIs (ventas hoy/semana, top/bottom productos, proyección mensual) | ✅ Completo |
+| 3 | Módulo mesero (POS móvil, mesa + notas por ítem, items agrupados por impresora) | ✅ Completo |
 | 3 | Gestión de categorías (CRUD UI) | Pendiente |
-| 4 | Mesas y meseros (asignación de órdenes) | Pendiente |
+| 4 | Módulo de impresión real (envío a impresoras configuradas) | Pendiente |
+| 4 | Mesas físicas como modelo (en lugar de string libre) | Pendiente |
 | 5 | Reservas | Pendiente |
 | 6 | Nómina de empleados | Pendiente |

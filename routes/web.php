@@ -6,19 +6,22 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\IngredientController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\ProductController;
+use App\Http\Controllers\WaiterController;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
-use Laravel\Fortify\Features;
-
-/* Route::inertia('/', 'Welcome', [
-    'canRegister' => Features::enabled(Features::registration()),
-])->name('home'); */
 
 Route::get('/', function () {
-    return auth()->check() ? redirect()->route('dashboard') : redirect()->route('login');
+    return Auth::check() ? redirect()->route('dashboard') : redirect()->route('login');
 })->name('home');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('dashboard', DashboardController::class)->name('dashboard');
+
+    Route::get('waiter', [WaiterController::class, 'index'])->name('waiter.index');
+    Route::get('waiter/create', [WaiterController::class, 'create'])->name('waiter.create');
+    Route::post('waiter', [WaiterController::class, 'store'])->name('waiter.store');
+    Route::get('waiter/{order}', [WaiterController::class, 'show'])->name('waiter.show');
+    Route::post('waiter/{order}/items', [WaiterController::class, 'addItems'])->name('waiter.add-items');
 
     Route::resource('orders', OrderController::class);
     Route::post('orders/{order}/split', [OrderController::class, 'split'])->name('orders.split');

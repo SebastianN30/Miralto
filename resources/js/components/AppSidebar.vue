@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { BookOpen, ClipboardList, FolderGit2, LayoutGrid, Package, Wallet } from 'lucide-vue-next';
+import { ClipboardList, ConciergeBell, LayoutGrid, Package, Wallet } from 'lucide-vue-next';
 import AppLogo from '@/components/AppLogo.vue';
-import NavFooter from '@/components/NavFooter.vue';
 import NavMain from '@/components/NavMain.vue';
 import NavUser from '@/components/NavUser.vue';
 import {
@@ -18,6 +17,7 @@ import { dashboard } from '@/routes';
 import { index as cashIndex } from '@/routes/cash';
 import { index as ordersIndex } from '@/routes/orders';
 import { index as productsIndex } from '@/routes/products';
+import { index as waiterIndex } from '@/routes/waiter';
 import type { NavItem } from '@/types';
 
 const mainNavItems: NavItem[] = [
@@ -41,18 +41,10 @@ const mainNavItems: NavItem[] = [
         href: cashIndex(),
         icon: Wallet,
     },
-];
-
-const footerNavItems: NavItem[] = [
     {
-        title: 'Repository',
-        href: 'https://github.com/laravel/vue-starter-kit',
-        icon: FolderGit2,
-    },
-    {
-        title: 'Documentation',
-        href: 'https://laravel.com/docs/starter-kits#vue',
-        icon: BookOpen,
+        title: 'Modo mesero',
+        href: waiterIndex(),
+        icon: ConciergeBell,
     },
 ];
 </script>
@@ -76,7 +68,6 @@ const footerNavItems: NavItem[] = [
         </SidebarContent>
 
         <SidebarFooter>
-            <!-- <NavFooter :items="footerNavItems" /> -->
             <NavUser />
         </SidebarFooter>
     </Sidebar>
