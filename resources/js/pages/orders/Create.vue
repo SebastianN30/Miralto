@@ -8,7 +8,8 @@ import { Button } from '@/components/ui/button';
 import type { Category } from '@/types';
 import { index, create } from '@/routes/orders';
 
-type Props = { categories: Category[] };
+type TableOption = { id: number; name: string; zone: string | null; capacity: number | null };
+type Props = { categories: Category[]; tables: TableOption[] };
 
 type CartItem = {
     product_id: number;
@@ -50,6 +51,7 @@ const paymentAmount2 = computed(() =>
 );
 
 // Form state
+const selectedTableId = ref<number | null>(null);
 const notes = ref('');
 const processing = ref(false);
 const errors = ref<FormErrors>({});
@@ -112,6 +114,7 @@ function submit() {
     router.post(
         OrderController.store.url(),
         {
+            table_id: selectedTableId.value || null,
             items: cart.value.map((i) => ({ product_id: i.product_id, quantity: i.quantity })),
             payment_method: paymentMethod.value || null,
             payment_amount_1: useSplitPayment.value ? paymentAmount1.value : null,
@@ -130,14 +133,33 @@ function formatCOP(value: number): string {
     return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value);
 }
 
+const searchQuery = ref('');
+
 const activeProducts = computed(() => {
-    if (!activeCategory.value) return [];
-    return props.categories.find((c) => c.id === activeCategory.value)?.active_products ?? [];
+    // Productos base de la categoría activa
+    const products =
+        props.categories.find((c) => c.id === activeCategory.value)
+            ?.active_products ?? [];
+
+    // Texto buscado
+    const q = searchQuery.value.trim().toLowerCase();
+
+    // Si no hay búsqueda, devolver todo
+    if (!q) return products;
+
+    // Filtrar
+    return products.filter((p) => {
+        return (
+            p.name.toLowerCase().includes(q) ||
+            (p.description?.toLowerCase().includes(q) ?? false)
+        );
+    });
 });
 
 const availableSecondMethods = computed(() =>
     PAYMENT_METHODS.filter((m) => m.value !== paymentMethod.value),
 );
+
 </script>
 
 <template>
@@ -145,6 +167,14 @@ const availableSecondMethods = computed(() =>
 
     <div class="flex h-full flex-col gap-4 p-4">
         <h1 class="text-xl font-semibold">Nueva Orden</h1>
+
+        <!-- Search -->
+        <input
+            v-model="searchQuery"
+            type="search"
+            placeholder="Buscar producto…"
+            class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus:border-ring focus:outline-none"
+        />
 
         <div class="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-5">
 
@@ -303,6 +333,25 @@ const availableSecondMethods = computed(() =>
                                     >{{ method.label }}: {{ formatCOP(paymentAmount2) }}</button>
                                 </div>
                                 <InputError v-if="errors.payment_method_2" :message="errors.payment_method_2" />
+                            </div>
+                        </div>
+
+                        <!-- Table selector -->
+                        <div v-if="tables.length > 0">
+                            <label class="mb-1.5 block text-sm text-muted-foreground">Mesa (opcional)</label>
+                            <div class="flex flex-wrap gap-1.5">
+                                <button
+                                    v-for="t in tables"
+                                    :key="t.id"
+                                    type="button"
+                                    class="rounded-md border px-2.5 py-1 text-xs font-medium transition-colors"
+                                    :class="selectedTableId === t.id
+                                        ? 'border-miralto-verde bg-miralto-verde/10 text-miralto-verde'
+                                        : 'border-sidebar-border/70 hover:border-miralto-verde/40'"
+                                    @click="selectedTableId = selectedTableId === t.id ? null : t.id"
+                                >
+                                    {{ t.name }}<span v-if="t.zone" class="opacity-60"> · {{ t.zone }}</span>
+                                </button>
                             </div>
                         </div>
 

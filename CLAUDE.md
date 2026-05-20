@@ -415,17 +415,20 @@ Generado automáticamente por el `OrderObserver` (PHP attribute `#[ObservedBy]` 
 | `user_id` | FK | → users, restrictOnDelete |
 | `cash_register_id` | FK nullable | → cash_registers, nullOnDelete (caja activa al crearse) |
 | `table_name` | string(100) nullable | nombre/número de mesa (modo mesero) |
-| `total` | decimal(10,2) | calculado desde items |
+| `total` | decimal(10,2) | calculado desde items (incluye cargo por servicio si aplica) |
 | `status` | enum(pending, paid, cancelled) | default: pending |
 | `payment_method` | enum(cash, transfer, card) nullable | método principal |
 | `payment_amount_1` | decimal(10,2) nullable | monto método principal (pago dividido) |
 | `payment_method_2` | enum(cash, transfer, card) nullable | segundo método (pago dividido) |
 | `payment_amount_2` | decimal(10,2) nullable | monto segundo método |
+| `service_charge` | boolean | default: false — si se aplica cargo por servicio del 10% |
+| `service_charge_amount` | decimal(10,2) nullable | monto calculado del 10% de cargo por servicio |
 | `notes` | text nullable | observaciones |
 | `timestamps` | | |
 
 **Modelo `Order`:**
-- `recalculateTotal()` → suma `subtotal` de los items y guarda
+- `recalculateTotal()` → suma `subtotal` de los items; si `service_charge = true`, añade `service_charge_amount` al total
+- `computedServiceChargeAmount()` → calcula 10% del subtotal de items (sin guardarlo)
 - `hasSplitPayment()` → `payment_method_2 !== null`
 - `totalPaid()` → suma `payment_amount_1 + payment_amount_2`
 - `remainingBalance()` → diferencia entre total y lo pagado
@@ -448,6 +451,53 @@ Generado automáticamente por el `OrderObserver` (PHP attribute `#[ObservedBy]` 
 | `timestamps` | | |
 
 **Modelo `OrderItem`:** relaciones `order()` belongsTo, `product()` belongsTo. Índices en `order_id` y `product_id`.
+
+---
+
+### `wallets`
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | bigIncrements | PK |
+| `name` | string | nombre de la billetera |
+| `type` | enum(nubank, daviplata, nequi, other) | tipo de billetera digital |
+| `account_identifier` | string nullable | número de cuenta o identificador |
+| `initial_balance` | decimal(12,2) | saldo inicial de la billetera |
+| `is_active` | boolean | default: true |
+| `notes` | text nullable | observaciones |
+| `timestamps` | | |
+| índices | type, is_active | |
+
+**Modelo `Wallet`:**
+- `scopeActive()` → filtra billeteras activas
+- `totalInbound()` → suma de transacciones tipo `payment` + `income`
+- `totalOutbound()` → suma de transacciones tipo `expense`
+- `currentBalance()` → `initial_balance + totalInbound() - totalOutbound()`
+- `totalIncome()` → solo ingresos manuales (tipo `income`)
+- `totalPayments()` → solo pagos recibidos (tipo `payment`)
+- `totalExpenses()` → solo egresos (tipo `expense`)
+- Relaciones: `transactions()` hasMany.
+
+---
+
+### `wallet_transactions`
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | bigIncrements | PK |
+| `wallet_id` | FK | → wallets, cascadeOnDelete |
+| `user_id` | FK nullable | → users, nullOnDelete |
+| `order_id` | FK nullable | → orders, nullOnDelete (vincula pago a una orden) |
+| `type` | enum(income, expense, payment) | income=ingreso manual, expense=egreso, payment=pago recibido |
+| `amount` | decimal(12,2) | monto |
+| `description` | string | descripción del movimiento |
+| `reference` | string nullable | referencia externa (ej: REF-123456) |
+| `transaction_date` | date | fecha del movimiento |
+| `timestamps` | | |
+| índices | [wallet_id, type], transaction_date | |
+
+**Modelo `WalletTransaction`:**
+- `isInbound()` → `true` si tipo es `income` o `payment`
+- `isOutbound()` → `true` si tipo es `expense`
+- Relaciones: `wallet()` belongsTo, `user()` belongsTo, `order()` belongsTo (opcional).
 
 ---
 
@@ -557,6 +607,36 @@ Si no hay caja abierta cuando se debería crear un movimiento automático, el ob
 
 ---
 
+## Módulo de Billeteras – comportamiento clave
+
+Gestión de billeteras digitales (Nequi, Daviplata, Nubank, otras) con registro de movimientos.
+
+### Tipos de billetera
+- `nubank` (morado), `nequi` (rosa), `daviplata` (naranja), `other` (gris) — cada tipo tiene colores distintivos en la UI.
+
+### Saldo calculado
+- `currentBalance() = initial_balance + totalInbound() - totalOutbound()`
+- La UI muestra el saldo en rojo si es negativo, verde si positivo.
+
+### Tipos de transacción
+- `payment` — pago recibido de un cliente (puede vincularse a una `order_id`)
+- `income` — ingreso manual (ej. recarga externa)
+- `expense` — egreso (ej. retiro, transferencia saliente)
+
+### Reglas de negocio
+- Solo se pueden registrar movimientos en billeteras con `is_active = true`.
+- Solo admins pueden eliminar transacciones.
+- No hay transacciones automáticas vinculadas al observer de órdenes — los pagos en billetera se registran manualmente.
+
+### UI (wallets/Show.vue)
+- Filtro por tipo con botones (Todos / Pago recibido / Ingreso / Egreso).
+- Iconos por tipo: `ArrowDownLeft` (income), `CircleDollarSign` (payment), `ArrowUpRight` (expense).
+- Columnas de tabla responsivas (algunas se ocultan en pantallas pequeñas).
+- Modal "Registrar movimiento": tipo, monto, descripción, referencia (opcional), fecha (default hoy).
+- Modal "Editar billetera": todos los campos incluyendo `is_active` (checkbox) e `initial_balance`.
+
+---
+
 ## Módulo de Productos – comportamiento clave
 
 ### CRUD completo
@@ -596,11 +676,25 @@ Permite que una orden se pague con dos métodos distintos (ej. parte en efectivo
 - `payment_method_2` + `payment_amount_2` = segundo método
 - `payment_amount_2` se calcula como `total - payment_amount_1` en el frontend
 
+### Cargo por servicio (`service_charge`)
+Permite aplicar un 10% adicional sobre el subtotal de items.
+- Se activa/desactiva en el formulario de edición de la orden (`orders/Edit.vue`).
+- Al guardar con `service_charge = true`: el backend calcula `service_charge_amount = subtotal × 0.10` y `total = subtotal + service_charge_amount`.
+- Si se desactiva: `service_charge = false`, `service_charge_amount = null`, `total = subtotal`.
+- `recalculateTotal()` respeta el flag — si `service_charge = true`, recalcula e incluye el 10% automáticamente.
+
+### Agregar items a orden existente (`/orders/{order}/items`)
+Permite añadir productos a una orden ya guardada que siga en estado `pending`.
+- Solo se pueden agregar items, nunca reducir ni eliminar (la eliminación requiere cancelar la orden).
+- El backend valida `status = 'pending'` antes de aceptar.
+- Llama `recalculateTotal()` al final, respetando `service_charge` si ya estaba aplicado.
+- Disponible desde el sidebar del admin (no exclusivo del módulo mesero).
+
 ### Dividir orden (`/orders/{order}/split`)
 Mueve items (o parte de ellos) a una nueva orden pendiente.
 - Si la cantidad a separar iguala la cantidad total del item → el item se mueve completo
 - Si la cantidad es menor → se reduce la cantidad original y se crea un nuevo item en la nueva orden
-- Ambas órdenes recalculan su total al final
+- Ambas órdenes llaman `recalculateTotal()` al final (respetan `service_charge` individual de cada una)
 
 ### Control de acceso
 - **Eliminar orden:** solo usuarios con `role = 'admin'`. Backend: `abort(403)` si no es admin. Frontend: `v-if="isAdmin"` con `usePage().props.auth.user.role`.
@@ -647,6 +741,25 @@ GET    /waiter/create                → WaiterController@create
 POST   /waiter                       → WaiterController@store
 GET    /waiter/{order}               → WaiterController@show (items agrupados por printer_id)
 POST   /waiter/{order}/items         → WaiterController@addItems (solo agregar, nunca quitar)
+
+POST   /orders/{order}/items         → OrderController@addItems (agregar items desde admin, solo pending)
+
+GET    /wallets                      → WalletController@index (listado + stats globales)
+POST   /wallets                      → WalletController@store (crear billetera)
+GET    /wallets/{wallet}             → WalletController@show (detalle + transacciones)
+PATCH  /wallets/{wallet}             → WalletController@update (editar billetera)
+POST   /wallets/{wallet}/transactions → WalletTransactionController@store (registrar movimiento)
+DELETE /wallets/transactions/{transaction} → WalletTransactionController@destroy (admin only)
+
+GET    /tables                        → TableController@index (lista con pedidos activos count)
+POST   /tables                        → TableController@store (admin only)
+PATCH  /tables/{table}                → TableController@update (admin only)
+DELETE /tables/{table}                → TableController@destroy (admin only, si no tiene pedidos pendientes)
+
+GET    /suppliers                     → SupplierController@index (lista con stats)
+POST   /suppliers                     → SupplierController@store (admin only)
+PATCH  /suppliers/{supplier}          → SupplierController@update (admin only)
+DELETE /suppliers/{supplier}          → SupplierController@destroy (admin only)
 ```
 
 **Settings** (en `routes/settings.php`): profile, security (password + 2FA), appearance.
@@ -661,8 +774,15 @@ auth/           Login, Register, ForgotPassword, ResetPassword, ConfirmPassword,
 orders/
   Index.vue     Lista con estadísticas (total, pendientes, pagadas, ingresos), filtros y paginación
   Create.vue    Selector de productos por categoría + carrito + checkout con pago dividido
-  Show.vue      Detalle de orden, acciones rápidas (marcar pagado, cancelar), diálogo dividir orden
-  Edit.vue      Formulario edición de estado y pago (incluye pago dividido)
+  Show.vue      Detalle de orden, acciones rápidas (marcar pagado, cancelar), diálogo dividir orden, diálogo agregar items
+  Edit.vue      Formulario edición de estado y pago (incluye pago dividido + toggle cargo por servicio)
+wallets/
+  Index.vue     Grid de billeteras con stats globales (total, activas, saldo total), modal crear billetera
+  Show.vue      Detalle con 4 cards (saldo actual, pagos, ingresos, egresos), filtro por tipo, tabla de transacciones, modales registrar movimiento y editar billetera
+tables/
+  Index.vue     CRUD de mesas: stats (total/activas/inactivas), chip-selector de mesas con zona, diálogos crear/editar (nombre, capacidad, zona, toggle activo), guard si tiene pedidos pendientes
+suppliers/
+  Index.vue     CRUD de proveedores: stats, tabla con contacto/teléfono/correo clicables, diálogos crear/editar, toggle activo
 products/
   Index.vue     Lista con filtros (búsqueda, categoría, estado), stats (total/activos/inactivos/archivados), tabla con margen%
   Create.vue    Formulario con constructor de insumos + panel de precio sugerido
@@ -701,7 +821,11 @@ defineOptions({
 **Restricción:** `defineOptions` se hoist fuera del `setup()`, por lo que no puede referenciar `props`. Los títulos dinámicos (ej. `#${order.id}`) deben ir en `<Head title>` y en el `h1` de la página.
 
 ### Tipos TypeScript (`resources/js/types/`)
-- `models.ts` → `Category`, `Ingredient`, `ProductIngredient`, `Product`, `OrderItem`, `Order`, `OrderStatus`, `PaymentMethod`, `OrderLog`, `OrderLogAction`, `CashRegister`, `CashRegisterStatus`, `CashMovement`, `CashMovementType`, `PaginatedData<T>`
+- `models.ts` → `Category`, `Ingredient`, `ProductIngredient`, `Product`, `OrderItem`, `Order`, `OrderStatus`, `PaymentMethod`, `OrderLog`, `OrderLogAction`, `CashRegister`, `CashRegisterStatus`, `CashMovement`, `CashMovementType`, `Wallet`, `WalletType`, `WalletTransaction`, `WalletTransactionType`, `PaginatedData<T>`
+  - `Order` incluye `service_charge: boolean` y `service_charge_amount: string | null`
+  - `WalletType`: `'nubank' | 'daviplata' | 'nequi' | 'other'`
+  - `WalletTransactionType`: `'income' | 'expense' | 'payment'`
+  - `Wallet` incluye props computadas opcionales: `current_balance`, `total_inbound`, `total_outbound`
 - `auth.ts` → `User` (incluye `role: 'admin' | 'employee'`, `is_active: boolean`)
 - `navigation.ts` → `BreadcrumbItem`, `NavItem`
 
@@ -727,12 +851,15 @@ Librería headless basada en Reka UI. Disponibles: `alert`, `avatar`, `badge`, `
 
 ## Tests
 
-Ubicación: `tests/Feature/MiraltoModelsTest.php`
-
-Cubre (15 tests): creación de modelos, relaciones Eloquent, soft deletes en productos, `marginPercentage()`, `recalculateTotal()`, factory states de usuarios.
+| Archivo | Cubre |
+|---|---|
+| `tests/Feature/MiraltoModelsTest.php` | 15 tests: creación de modelos, relaciones Eloquent, soft deletes, `marginPercentage()`, `recalculateTotal()`, factory states de usuarios |
+| `tests/Feature/WalletModuleTest.php` | Módulo de billeteras: CRUD, saldo calculado, transacciones, restricciones de acceso |
 
 ```bash
 /c/laragon/bin/php/php-8.5.1/php.exe artisan test --compact tests/Feature/MiraltoModelsTest.php
+/c/laragon/bin/php/php-8.5.1/php.exe artisan test --compact tests/Feature/WalletModuleTest.php
+/c/laragon/bin/php/php-8.5.1/php.exe artisan test --compact  # todos los tests
 ```
 
 ---
@@ -747,8 +874,14 @@ Cubre (15 tests): creación de modelos, relaciones Eloquent, soft deletes en pro
 | 2 | Módulo de caja (apertura/cierre, movimientos, observer de órdenes) | ✅ Completo |
 | 3 | Dashboard con KPIs (ventas hoy/semana, top/bottom productos, proyección mensual) | ✅ Completo |
 | 3 | Módulo mesero (POS móvil, mesa + notas por ítem, items agrupados por impresora) | ✅ Completo |
-| 3 | Gestión de categorías (CRUD UI) | Pendiente |
+| 3 | Cargo por servicio en órdenes (10% toggle, recalculo automático) | ✅ Completo |
+| 3 | Agregar items a orden existente desde admin (solo pending) | ✅ Completo |
+| 3 | Módulo de billeteras digitales (Nequi, Daviplata, Nubank — saldo, transacciones) | ✅ Completo |
+| 3 | Gestión de categorías (CRUD UI) | ✅ Completo |
+| 3 | Alertas de stock bajo en Dashboard + color coding en Products/Index | ✅ Completo |
+| 3 | Audit trail en reversal de billeteras (expense COR-ORD-{id}) | ✅ Completo |
+| 4 | Mesas físicas como modelo (Table — selector en Waiter y admin Orders) | ✅ Completo |
+| 4 | Gestión de proveedores (CRUD UI) | ✅ Completo |
 | 4 | Módulo de impresión real (envío a impresoras configuradas) | Pendiente |
-| 4 | Mesas físicas como modelo (en lugar de string libre) | Pendiente |
 | 5 | Reservas | Pendiente |
 | 6 | Nómina de empleados | Pendiente |

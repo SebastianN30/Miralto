@@ -1,3 +1,26 @@
+export type Table = {
+    id: number;
+    name: string;
+    capacity: number | null;
+    zone: string | null;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
+    orders_count?: number;
+};
+
+export type Supplier = {
+    id: number;
+    name: string;
+    contact_name: string | null;
+    phone: string | null;
+    email: string | null;
+    notes: string | null;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
+};
+
 export type Category = {
     id: number;
     name: string;
@@ -7,6 +30,7 @@ export type Category = {
     updated_at: string;
     products?: Product[];
     active_products?: Product[];
+    products_count?: number;
 };
 
 export type Ingredient = {
@@ -72,7 +96,9 @@ export type Order = {
     id: number;
     user_id: number;
     cash_register_id: number | null;
+    table_id: number | null;
     table_name: string | null;
+    table?: Table;
     total: string;
     status: OrderStatus;
     payment_method: PaymentMethod | null;
@@ -80,6 +106,9 @@ export type Order = {
     payment_method_2: PaymentMethod | null;
     payment_amount_2: string | null;
     notes: string | null;
+    service_charge: boolean;
+    service_charge_percentage: string | null;
+    service_charge_amount: string | null;
     created_at: string;
     updated_at: string;
     user?: {
@@ -143,6 +172,42 @@ export type CashRegister = {
     total_sales_other?: string | number | null;
     total_expense?: string | number | null;
     orders?: Order[];
+};
+
+export type WalletType = 'nubank' | 'daviplata' | 'nequi' | 'other';
+export type WalletTransactionType = 'income' | 'expense' | 'payment';
+
+export type Wallet = {
+    id: number;
+    name: string;
+    type: WalletType;
+    account_identifier: string | null;
+    initial_balance: string;
+    is_active: boolean;
+    notes: string | null;
+    created_at: string;
+    updated_at: string;
+    transactions?: WalletTransaction[];
+    transactions_count?: number;
+    total_inbound?: string | number | null;
+    total_outbound?: string | number | null;
+    current_balance?: number;
+};
+
+export type WalletTransaction = {
+    id: number;
+    wallet_id: number;
+    user_id: number | null;
+    order_id: number | null;
+    type: WalletTransactionType;
+    amount: string;
+    description: string;
+    reference: string | null;
+    transaction_date: string;
+    created_at: string;
+    updated_at: string;
+    user?: { id: number; name: string };
+    order?: { id: number; total: string; status: OrderStatus };
 };
 
 export type PaginatedData<T> = {

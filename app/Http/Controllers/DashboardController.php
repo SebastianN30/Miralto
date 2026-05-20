@@ -25,6 +25,7 @@ class DashboardController extends Controller
             'topProducts' => $this->topProducts(8),
             'bottomProducts' => $this->bottomProducts(8),
             'projection' => $this->monthlyProjection($today, $startOfMonth, $startOfLastMonth, $endOfLastMonth),
+            'lowStockProducts' => $this->lowStockProducts(),
         ]);
     }
 
@@ -61,6 +62,29 @@ class DashboardController extends Controller
                 ? round((($revenueToday - $revenueYesterday) / $revenueYesterday) * 100, 1)
                 : null,
         ];
+    }
+
+    /**
+     * Active products with stock at or below 5 units.
+     *
+     * @return array<int, array{id: int, name: string, stock: int}>
+     */
+    private function lowStockProducts(): array
+    {
+        return Product::query()
+            ->where('is_active', true)
+            ->whereNull('deleted_at')
+            ->whereNotNull('stock')
+            ->where('stock', '<=', 5)
+            ->orderBy('stock')
+            ->orderBy('name')
+            ->get(['id', 'name', 'stock'])
+            ->map(fn ($p) => [
+                'id' => (int) $p->id,
+                'name' => $p->name,
+                'stock' => (int) $p->stock,
+            ])
+            ->all();
     }
 
     /**

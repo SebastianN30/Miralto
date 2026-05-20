@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { Head } from '@inertiajs/vue3';
-import {
-    TrendingUp, TrendingDown, ShoppingBag, DollarSign, Receipt,
-    ArrowUp, ArrowDown, Calendar, Trophy, AlertTriangle, Target,
+    import { Head } from '@inertiajs/vue3';
+    import {
+        TrendingUp, TrendingDown, ShoppingBag, DollarSign, Receipt,
+        ArrowUp, ArrowDown, Calendar, Trophy, AlertTriangle, Target, PackageX,
 } from 'lucide-vue-next';
 import { computed } from 'vue';
 import { Bar, Line } from 'vue-chartjs';
@@ -22,6 +22,7 @@ ChartJS.register(
 
 type SaleDay = { date: string; label: string; total: number; orders: number };
 type ProductRow = { id: number; name: string; units: number; revenue: number };
+type LowStockProduct = { id: number; name: string; stock: number };
 
 type Props = {
     kpis: {
@@ -45,6 +46,7 @@ type Props = {
         vs_last_month_pct: number | null;
         month_label: string;
     };
+    lowStockProducts: LowStockProduct[];
 };
 
 const props = defineProps<Props>();
@@ -294,6 +296,30 @@ const maxUnits = computed(() => Math.max(...props.topProducts.map((p) => p.units
 
             <div class="h-56">
                 <Line :data="projectionChartData" :options="projectionChartOptions" />
+            </div>
+        </div>
+
+        <!-- ── Low stock alert ───────────────────────────── -->
+        <div v-if="lowStockProducts.length > 0" class="rounded-xl border border-amber-200 bg-amber-50 p-5 dark:border-amber-800 dark:bg-amber-900/20">
+            <div class="mb-3 flex items-center gap-2">
+                <PackageX class="size-5 text-amber-600" />
+                <h2 class="font-semibold text-amber-800 dark:text-amber-300">Stock bajo — {{ lowStockProducts.length }} producto(s)</h2>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <div
+                    v-for="p in lowStockProducts"
+                    :key="p.id"
+                    class="flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm"
+                    :class="p.stock === 0
+                        ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300'
+                        : 'border-amber-200 bg-white text-amber-800 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-300'"
+                >
+                    <span class="font-medium">{{ p.name }}</span>
+                    <span
+                        class="rounded-full px-1.5 py-0.5 text-xs font-bold"
+                        :class="p.stock === 0 ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300'"
+                    >{{ p.stock === 0 ? 'Agotado' : p.stock }}</span>
+                </div>
             </div>
         </div>
 

@@ -229,8 +229,17 @@ function calcMargin(product: Product): number | null {
                                 {{ calcMargin(product) !== null ? `${calcMargin(product)}%` : '—' }}
                             </span>
                         </td>
-                        <td class="hidden px-4 py-3 text-center text-muted-foreground xl:table-cell">
-                            {{ product.stock ?? '∞' }}
+                        <td class="hidden px-4 py-3 text-center xl:table-cell">
+                            <span v-if="product.stock === null" class="text-muted-foreground">∞</span>
+                            <span
+                                v-else-if="product.stock === 0"
+                                class="rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                            >Agotado</span>
+                            <span
+                                v-else-if="product.stock <= 5"
+                                class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                            >{{ product.stock }}</span>
+                            <span v-else class="text-muted-foreground">{{ product.stock }}</span>
                         </td>
                         <td class="px-4 py-3 text-center">
                             <Badge

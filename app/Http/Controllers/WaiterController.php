@@ -9,6 +9,7 @@ use App\Models\Category;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
+use App\Models\Table;
 use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -36,8 +37,11 @@ class WaiterController extends Controller
             ->orderBy('name')
             ->get();
 
+        $tables = Table::active()->orderBy('name')->get(['id', 'name', 'zone', 'capacity']);
+
         return Inertia::render('waiter/Create', [
             'categories' => $categories,
+            'tables' => $tables,
         ]);
     }
 
@@ -45,10 +49,16 @@ class WaiterController extends Controller
     {
         $openRegister = CashRegister::open()->latest('opened_at')->first();
 
+        $tableId = $request->table_id;
+        $tableName = $tableId
+            ? Table::find($tableId)?->name
+            : $request->table_name;
+
         $order = Order::create([
             'user_id' => $request->user()->id,
             'cash_register_id' => $openRegister?->id,
-            'table_name' => $request->table_name,
+            'table_id' => $tableId,
+            'table_name' => $tableName,
             'total' => 0,
             'status' => 'pending',
             'notes' => $request->notes,

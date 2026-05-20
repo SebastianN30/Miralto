@@ -18,7 +18,8 @@ class StoreWaiterOrderRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'table_name' => ['required', 'string', 'max:100'],
+            'table_id' => ['nullable', 'integer', 'exists:tables,id'],
+            'table_name' => ['nullable', 'string', 'max:100'],
             'notes' => ['nullable', 'string', 'max:500'],
             'items' => ['required', 'array', 'min:1'],
             'items.*.product_id' => ['required', 'integer', 'exists:products,id'],

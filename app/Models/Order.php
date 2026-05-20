@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Fillable([
     'user_id',
     'cash_register_id',
+    'table_id',
     'table_name',
     'total',
     'status',
@@ -22,6 +23,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'payment_method_2',
     'payment_amount_2',
     'notes',
+    'service_charge',
+    'service_charge_percentage',
+    'service_charge_amount',
 ])]
 #[ObservedBy([OrderObserver::class])]
 class Order extends Model
@@ -35,6 +39,9 @@ class Order extends Model
             'total' => 'decimal:2',
             'payment_amount_1' => 'decimal:2',
             'payment_amount_2' => 'decimal:2',
+            'service_charge' => 'boolean',
+            'service_charge_percentage' => 'decimal:2',
+            'service_charge_amount' => 'decimal:2',
         ];
     }
 
@@ -46,6 +53,11 @@ class Order extends Model
     public function cashRegister(): BelongsTo
     {
         return $this->belongsTo(CashRegister::class);
+    }
+
+    public function table(): BelongsTo
+    {
+        return $this->belongsTo(Table::class);
     }
 
     public function items(): HasMany
@@ -101,12 +113,31 @@ class Order extends Model
         return $paid > 0 ? max(0, (float) $this->total - $paid) : 0;
     }
 
+    /** Computed service charge amount using the stored percentage (default 10%). */
+    public function computedServiceChargeAmount(): float
+    {
+        $pct = (float) ($this->service_charge_percentage ?? 10);
+
+        return round((float) $this->items()->sum('subtotal') * ($pct / 100), 2);
+    }
+
     /**
      * Recalculate and persist the order total from its items.
+     * Preserves the service charge and percentage if already applied.
      */
     public function recalculateTotal(): void
     {
-        $this->total = $this->items()->sum('subtotal');
+        $subtotal = (float) $this->items()->sum('subtotal');
+
+        if ($this->service_charge) {
+            $pct = (float) ($this->service_charge_percentage ?? 10);
+            $serviceAmount = round($subtotal * ($pct / 100), 2);
+            $this->service_charge_amount = $serviceAmount;
+            $this->total = round($subtotal + $serviceAmount, 2);
+        } else {
+            $this->total = $subtotal;
+        }
+
         $this->save();
     }
 }

@@ -9,7 +9,8 @@ import { Label } from '@/components/ui/label';
 import type { Category } from '@/types';
 import { index } from '@/routes/waiter';
 
-type Props = { categories: Category[] };
+type TableOption = { id: number; name: string; zone: string | null; capacity: number | null };
+type Props = { categories: Category[]; tables: TableOption[] };
 
 type CartItem = {
     product_id: number;
@@ -22,7 +23,8 @@ type CartItem = {
 
 const props = defineProps<Props>();
 
-const tableName = ref('');
+const selectedTableId = ref<number | null>(null);
+const freeTableName = ref('');
 const orderNotes = ref('');
 const cart = ref<CartItem[]>([]);
 const activeCategory = ref<number | null>(props.categories[0]?.id ?? null);
@@ -71,8 +73,8 @@ function formatCOP(value: number): string {
 }
 
 function submit() {
-    if (!tableName.value.trim()) {
-        errors.value = { table_name: 'Indica el nombre/número de la mesa.' };
+    if (!selectedTableId.value && !freeTableName.value.trim()) {
+        errors.value = { table_name: 'Selecciona una mesa o indica un nombre.' };
         return;
     }
     if (cart.value.length === 0) {
@@ -86,7 +88,8 @@ function submit() {
     router.post(
         WaiterController.store.url(),
         {
-            table_name: tableName.value,
+            table_id: selectedTableId.value || null,
+            table_name: selectedTableId.value ? null : freeTableName.value,
             notes: orderNotes.value || null,
             items: cart.value.map((i) => ({
                 product_id: i.product_id,
@@ -113,14 +116,40 @@ function submit() {
             Volver
         </Link>
 
-        <!-- Table name -->
+        <!-- Table selector -->
         <div class="space-y-1.5">
             <Label for="table">Mesa *</Label>
+            <div v-if="tables.length > 0" class="flex flex-wrap gap-2">
+                <button
+                    v-for="t in tables"
+                    :key="t.id"
+                    type="button"
+                    class="rounded-lg border px-3 py-2 text-sm font-medium transition-colors active:scale-95"
+                    :class="selectedTableId === t.id
+                        ? 'border-miralto-verde bg-miralto-verde/10 text-miralto-verde'
+                        : 'border-sidebar-border/70 bg-card hover:border-miralto-verde/40'"
+                    @click="selectedTableId = selectedTableId === t.id ? null : t.id"
+                >
+                    {{ t.name }}
+                    <span v-if="t.zone" class="ml-1 text-xs opacity-60">{{ t.zone }}</span>
+                </button>
+                <button
+                    type="button"
+                    class="rounded-lg border px-3 py-2 text-sm font-medium transition-colors active:scale-95"
+                    :class="selectedTableId === null && freeTableName
+                        ? 'border-miralto-verde bg-miralto-verde/10 text-miralto-verde'
+                        : 'border-sidebar-border/70 bg-card hover:border-miralto-verde/40'"
+                    @click="selectedTableId = null"
+                >
+                    Otra…
+                </button>
+            </div>
             <input
+                v-if="tables.length === 0 || selectedTableId === null"
                 id="table"
-                v-model="tableName"
+                v-model="freeTableName"
                 type="text"
-                placeholder="Ej. Mesa 5, Terraza 2, Don Carlos…"
+                placeholder="Ej. Mesa 5, Terraza, Don Carlos…"
                 class="h-11 w-full rounded-lg border border-input bg-card px-3 text-base font-medium placeholder:text-muted-foreground focus:border-miralto-verde focus:outline-none focus:ring-2 focus:ring-miralto-verde/20"
             />
             <InputError :message="errors.table_name" />
