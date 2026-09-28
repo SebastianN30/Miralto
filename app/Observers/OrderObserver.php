@@ -6,6 +6,7 @@ use App\Models\CashMovement;
 use App\Models\CashRegister;
 use App\Models\Order;
 use App\Models\OrderLog;
+use App\Models\Product;
 
 class OrderObserver
 {
@@ -28,8 +29,10 @@ class OrderObserver
             // Auto cash movements
             if ($to === 'paid') {
                 $this->createSaleMovements($order);
+                $this->adjustStock($order, -1);
             } elseif ($to === 'cancelled' && $from === 'paid') {
                 $this->createRefundMovement($order);
+                $this->adjustStock($order, 1);
             }
 
             return; // Don't double-log if status changed
@@ -52,7 +55,7 @@ class OrderObserver
         }
     }
 
-    public function deleted(Order $order): void
+    public function deleting(Order $order): void
     {
         $this->log($order, 'deleted', "Orden #{$order->id} eliminada");
     }
@@ -144,5 +147,23 @@ class OrderObserver
             'amount' => $order->total,
             'description' => "Devolución orden #{$order->id} (cancelada)",
         ]);
+    }
+
+    /**
+     * Adjust product stock for every item in the order.
+     * $direction: -1 to decrement (sale), 1 to increment (refund/cancellation).
+     * Products with stock = null (untracked) are skipped.
+     */
+    private function adjustStock(Order $order, int $direction): void
+    {
+        $order->loadMissing('items');
+
+        foreach ($order->items as $item) {
+            if ($direction < 0) {
+                Product::whereKey($item->product_id)->whereNotNull('stock')->decrement('stock', $item->quantity);
+            } else {
+                Product::whereKey($item->product_id)->whereNotNull('stock')->increment('stock', $item->quantity);
+            }
+        }
     }
 }

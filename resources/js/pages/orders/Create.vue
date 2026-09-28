@@ -9,7 +9,8 @@ import type { Category } from '@/types';
 import { index, create } from '@/routes/orders';
 
 type TableOption = { id: number; name: string; zone: string | null; capacity: number | null };
-type Props = { categories: Category[]; tables: TableOption[] };
+type EmployeeOption = { id: number; name: string; position: string | null };
+type Props = { categories: Category[]; tables: TableOption[]; employees: EmployeeOption[] };
 
 type CartItem = {
     product_id: number;
@@ -52,6 +53,8 @@ const paymentAmount2 = computed(() =>
 
 // Form state
 const selectedTableId = ref<number | null>(null);
+const freeTableName = ref('');
+const selectedEmployeeId = ref<number | null>(null);
 const notes = ref('');
 const processing = ref(false);
 const errors = ref<FormErrors>({});
@@ -115,6 +118,8 @@ function submit() {
         OrderController.store.url(),
         {
             table_id: selectedTableId.value || null,
+            table_name: selectedTableId.value ? null : freeTableName.value.trim() || null,
+            employee_id: selectedEmployeeId.value,
             items: cart.value.map((i) => ({ product_id: i.product_id, quantity: i.quantity })),
             payment_method: paymentMethod.value || null,
             payment_amount_1: useSplitPayment.value ? paymentAmount1.value : null,
@@ -337,9 +342,9 @@ const availableSecondMethods = computed(() =>
                         </div>
 
                         <!-- Table selector -->
-                        <div v-if="tables.length > 0">
-                            <label class="mb-1.5 block text-sm text-muted-foreground">Mesa (opcional)</label>
-                            <div class="flex flex-wrap gap-1.5">
+                        <div>
+                            <label class="mb-1.5 block text-sm text-muted-foreground" for="table_name">Mesa (opcional)</label>
+                            <div v-if="tables.length > 0" class="mb-2 flex flex-wrap gap-1.5">
                                 <button
                                     v-for="t in tables"
                                     :key="t.id"
@@ -353,6 +358,32 @@ const availableSecondMethods = computed(() =>
                                     {{ t.name }}<span v-if="t.zone" class="opacity-60"> · {{ t.zone }}</span>
                                 </button>
                             </div>
+                            <input
+                                v-if="selectedTableId === null"
+                                id="table_name"
+                                v-model="freeTableName"
+                                type="text"
+                                maxlength="100"
+                                placeholder="Ej. P1, C2…"
+                                class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/20"
+                            />
+                            <InputError v-if="errors.table_name" :message="errors.table_name" />
+                        </div>
+
+                        <!-- Employee -->
+                        <div v-if="employees.length > 0">
+                            <label class="mb-1.5 block text-sm text-muted-foreground" for="employee_id">Empleado (opcional)</label>
+                            <select
+                                id="employee_id"
+                                v-model="selectedEmployeeId"
+                                class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none"
+                            >
+                                <option :value="null">No es de empleado</option>
+                                <option v-for="e in employees" :key="e.id" :value="e.id">
+                                    {{ e.name }}<template v-if="e.position"> · {{ e.position }}</template>
+                                </option>
+                            </select>
+                            <InputError v-if="errors.employee_id" :message="errors.employee_id" />
                         </div>
 
                         <!-- Notes -->

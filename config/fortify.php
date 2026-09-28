@@ -144,7 +144,9 @@ return [
     */
 
     'features' => [
-        Features::registration(),
+        // Registro público deshabilitado: todos los usuarios (admin/employee/waiter/cook)
+        // se crean desde /employees o los seeders. Ver project_miralto memory.
+        // Features::registration(),
         Features::resetPasswords(),
         Features::emailVerification(),
         Features::twoFactorAuthentication([

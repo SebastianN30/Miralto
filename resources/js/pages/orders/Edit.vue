@@ -9,7 +9,9 @@ import { Label } from '@/components/ui/label';
 import type { Order, Wallet } from '@/types';
 import { index, show } from '@/routes/orders';
 
-type Props = { order: Order; wallets: Wallet[] };
+type TableOption = { id: number; name: string; zone: string | null; capacity: number | null };
+type EmployeeOption = { id: number; name: string; position: string | null };
+type Props = { order: Order; wallets: Wallet[]; tables: TableOption[]; employees: EmployeeOption[] };
 
 const props = defineProps<Props>();
 
@@ -49,11 +51,14 @@ const serviceFixedAmount = ref<number>(
 );
 
 const itemsSubtotal = computed(() => {
-    const t = Number(props.order.total);
+    let t = Number(props.order.total);
     if (props.order.service_charge && props.order.service_charge_amount) {
-        return Math.round(t - Number(props.order.service_charge_amount));
+        t -= Number(props.order.service_charge_amount);
     }
-    return t;
+    if (props.order.tax && props.order.tax_amount) {
+        t -= Number(props.order.tax_amount);
+    }
+    return Math.round(t);
 });
 const computedServiceAmount = computed(() => {
     if (!serviceCharge.value) return 0;
@@ -62,7 +67,12 @@ const computedServiceAmount = computed(() => {
     }
     return Math.round(serviceFixedAmount.value);
 });
-const computedTotal = computed(() => itemsSubtotal.value + computedServiceAmount.value);
+
+// ── Tax ──────────────────────────────────────────────────────
+const tax = ref(props.order.tax);
+const computedTaxAmount = computed(() => (tax.value ? Math.round(itemsSubtotal.value * 0.035) : 0));
+
+const computedTotal = computed(() => itemsSubtotal.value + computedServiceAmount.value + computedTaxAmount.value);
 
 // ── Payment ─────────────────────────────────────────────────
 const status = ref(props.order.status);
@@ -72,6 +82,13 @@ const paymentAmount1 = ref<number>(Number(props.order.payment_amount_1 ?? comput
 const paymentMethod2 = ref(props.order.payment_method_2 ?? '');
 const selectedWalletId1 = ref<number | null>(null);
 const selectedWalletId2 = ref<number | null>(null);
+
+// ── Table ────────────────────────────────────────────────────
+const selectedTableId = ref<number | null>(props.order.table_id);
+const freeTableName = ref(props.order.table_id ? '' : (props.order.table_name ?? ''));
+
+// ── Employee ─────────────────────────────────────────────────
+const selectedEmployeeId = ref<number | null>(props.order.employee_id);
 
 // ── Security key (for paid orders) ─────────────────────────
 const securityKey = ref('');
@@ -111,6 +128,9 @@ function submit() {
         OrderController.update.url({ order: props.order.id }),
         {
             status: status.value,
+            table_id: selectedTableId.value || null,
+            table_name: selectedTableId.value ? null : freeTableName.value.trim() || null,
+            employee_id: selectedEmployeeId.value,
             payment_method: paymentMethod.value || null,
             payment_amount_1: useSplitPayment.value ? paymentAmount1.value : null,
             payment_method_2: useSplitPayment.value ? paymentMethod2.value : null,
@@ -119,6 +139,7 @@ function submit() {
             service_charge: serviceCharge.value,
             service_charge_percentage: (serviceCharge.value && serviceMode.value === 'percentage') ? servicePercentage.value : null,
             service_charge_custom_amount: (serviceCharge.value && serviceMode.value === 'fixed') ? serviceFixedAmount.value : null,
+            tax: tax.value,
             wallet_id_1: paymentMethod.value === 'transfer' ? selectedWalletId1.value : null,
             wallet_id_2: (useSplitPayment.value && paymentMethod2.value === 'transfer') ? selectedWalletId2.value : null,
             security_key: props.order.status === 'paid' ? securityKey.value : null,
@@ -179,6 +200,51 @@ function submit() {
                         </label>
                     </div>
                     <InputError :message="errors.status" />
+                </div>
+
+                <!-- Table -->
+                <div class="space-y-2">
+                    <Label for="table_name">Mesa (opcional)</Label>
+                    <div v-if="tables.length > 0" class="flex flex-wrap gap-1.5">
+                        <button
+                            v-for="t in tables"
+                            :key="t.id"
+                            type="button"
+                            class="rounded-md border px-2.5 py-1 text-xs font-medium transition-colors"
+                            :class="selectedTableId === t.id
+                                ? 'border-miralto-verde bg-miralto-verde/10 text-miralto-verde'
+                                : 'border-sidebar-border/70 hover:border-miralto-verde/40'"
+                            @click="selectedTableId = selectedTableId === t.id ? null : t.id"
+                        >
+                            {{ t.name }}<span v-if="t.zone" class="opacity-60"> · {{ t.zone }}</span>
+                        </button>
+                    </div>
+                    <input
+                        v-if="selectedTableId === null"
+                        id="table_name"
+                        v-model="freeTableName"
+                        type="text"
+                        maxlength="100"
+                        placeholder="Ej. P1, C2…"
+                        class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/20"
+                    />
+                    <InputError :message="errors.table_name" />
+                </div>
+
+                <!-- Employee -->
+                <div v-if="employees.length > 0" class="space-y-2">
+                    <Label for="employee_id">Empleado (opcional)</Label>
+                    <select
+                        id="employee_id"
+                        v-model="selectedEmployeeId"
+                        class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none"
+                    >
+                        <option :value="null">No es de empleado</option>
+                        <option v-for="e in employees" :key="e.id" :value="e.id">
+                            {{ e.name }}<template v-if="e.position"> · {{ e.position }}</template>
+                        </option>
+                    </select>
+                    <InputError :message="errors.employee_id" />
                 </div>
 
                 <!-- Primary payment method -->
@@ -341,6 +407,33 @@ function submit() {
                                     class="h-8 w-full rounded-md border border-input bg-background px-3 text-sm focus:border-ring focus:outline-none"
                                     @click.stop
                                 />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tax -->
+                <div class="space-y-2">
+                    <Label>Impuesto</Label>
+                    <div
+                        class="cursor-pointer rounded-lg border transition-colors"
+                        :class="tax ? 'border-miralto-verde bg-miralto-verde/5' : 'border-sidebar-border/70'"
+                        @click="tax = !tax"
+                    >
+                        <div class="flex items-center justify-between p-3">
+                            <div>
+                                <p class="text-sm font-medium">Impuesto (3.5%)</p>
+                                <p class="text-xs text-muted-foreground">
+                                    {{ tax
+                                        ? `Incluir impuesto del 3.5% → Total: ${formatCOP(computedTotal)}`
+                                        : 'Toca para activar' }}
+                                </p>
+                            </div>
+                            <div
+                                class="flex size-5 items-center justify-center rounded-full border-2 transition-colors"
+                                :class="tax ? 'border-miralto-verde bg-miralto-verde' : 'border-muted-foreground/40'"
+                            >
+                                <CheckCircle v-if="tax" class="size-3.5 text-white" />
                             </div>
                         </div>
                     </div>

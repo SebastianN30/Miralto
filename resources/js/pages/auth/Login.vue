@@ -43,16 +43,17 @@ defineProps<{
         class="flex flex-col gap-5"
     >
         <div class="grid gap-2">
-            <Label for="email">Correo electrónico</Label>
+            <Label for="email">Usuario o correo</Label>
             <Input
                 id="email"
-                type="email"
+                type="text"
                 name="email"
                 required
                 autofocus
                 :tabindex="1"
-                autocomplete="email"
-                placeholder="usuario@miralto.com"
+                autocomplete="username"
+                autocapitalize="none"
+                placeholder="usuario o usuario@miralto.com"
             />
             <InputError :message="errors.email" />
         </div>

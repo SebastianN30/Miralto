@@ -2,6 +2,7 @@ import { createInertiaApp } from '@inertiajs/vue3';
 import { initializeTheme } from '@/composables/useAppearance';
 import AppLayout from '@/layouts/AppLayout.vue';
 import AuthLayout from '@/layouts/AuthLayout.vue';
+import KitchenLayout from '@/layouts/KitchenLayout.vue';
 import SettingsLayout from '@/layouts/settings/Layout.vue';
 import WaiterLayout from '@/layouts/WaiterLayout.vue';
 import { initializeFlashToast } from '@/lib/flashToast';
@@ -18,6 +19,8 @@ createInertiaApp({
                 return AuthLayout;
             case name.startsWith('waiter/'):
                 return WaiterLayout;
+            case name.startsWith('kitchen/'):
+                return KitchenLayout;
             case name.startsWith('settings/'):
                 return [AppLayout, SettingsLayout];
             default:

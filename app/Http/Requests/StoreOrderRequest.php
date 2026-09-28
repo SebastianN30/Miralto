@@ -19,6 +19,7 @@ class StoreOrderRequest extends FormRequest
         return [
             'table_id' => ['nullable', 'integer', 'exists:tables,id'],
             'table_name' => ['nullable', 'string', 'max:100'],
+            'employee_id' => ['nullable', 'integer', 'exists:employees,id'],
             'items' => ['required', 'array', 'min:1'],
             'items.*.product_id' => ['required', 'integer', 'exists:products,id'],
             'items.*.quantity' => ['required', 'integer', 'min:1'],

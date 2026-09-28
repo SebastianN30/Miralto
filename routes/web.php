@@ -1,34 +1,47 @@
 <?php
 
-use App\Http\Controllers\WalletTransactionController;
 use App\Http\Controllers\CashMovementController;
 use App\Http\Controllers\CashRegisterController;
-use App\Http\Controllers\DailySalesController;
-use App\Http\Controllers\IngredientController;
-use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\CategoryController;
-use App\Http\Controllers\SupplierController;
+use App\Http\Controllers\DailySalesController;
+use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\EmployeeController;
+use App\Http\Controllers\IngredientController;
+use App\Http\Controllers\KitchenController;
+use App\Http\Controllers\OrderController;
 use App\Http\Controllers\ProductController;
+use App\Http\Controllers\SupplierController;
+use App\Http\Controllers\TableController;
 use App\Http\Controllers\WaiterController;
 use App\Http\Controllers\WalletController;
-use App\Http\Controllers\OrderController;
-use App\Http\Controllers\TableController;
-use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\WalletTransactionController;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
-    return Auth::check() ? redirect()->route('dashboard') : redirect()->route('login');
+    return Auth::check() ? redirect(Auth::user()->homePath()) : redirect()->route('login');
 })->name('home');
 
-Route::middleware(['auth', 'verified'])->group(function () {
-    Route::get('dashboard', DashboardController::class)->name('dashboard');
-    Route::get('sales', DailySalesController::class)->name('sales.index');
-
+// Modo mesero: admin, employee y mesero
+Route::middleware(['auth', 'verified', 'zone:waiter'])->group(function () {
     Route::get('waiter', [WaiterController::class, 'index'])->name('waiter.index');
     Route::get('waiter/create', [WaiterController::class, 'create'])->name('waiter.create');
     Route::post('waiter', [WaiterController::class, 'store'])->name('waiter.store');
     Route::get('waiter/{order}', [WaiterController::class, 'show'])->name('waiter.show');
     Route::post('waiter/{order}/items', [WaiterController::class, 'addItems'])->name('waiter.add-items');
+});
+
+// Cocina: admin, employee y cocinero
+Route::middleware(['auth', 'verified', 'zone:kitchen'])->group(function () {
+    Route::get('kitchen', [KitchenController::class, 'index'])->name('kitchen.index');
+    Route::patch('kitchen/items/{item}/ready', [KitchenController::class, 'toggleItem'])->name('kitchen.items.ready');
+    Route::patch('kitchen/orders/{order}/ready', [KitchenController::class, 'markOrder'])->name('kitchen.orders.ready');
+});
+
+// Panel administrativo: solo admin y employee (mesero y cocinero quedan fuera)
+Route::middleware(['auth', 'verified', 'zone:panel'])->group(function () {
+    Route::get('dashboard', DashboardController::class)->name('dashboard');
+    Route::get('sales', DailySalesController::class)->name('sales.index');
 
     Route::resource('orders', OrderController::class);
     Route::post('orders/{order}/split', [OrderController::class, 'split'])->name('orders.split');
@@ -36,6 +49,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     Route::resource('categories', CategoryController::class)->except(['show', 'create', 'edit']);
     Route::resource('tables', TableController::class)->except(['show', 'create', 'edit']);
+    Route::resource('employees', EmployeeController::class)->except(['show', 'create', 'edit']);
     Route::resource('suppliers', SupplierController::class)->except(['show', 'create', 'edit']);
 
     Route::resource('products', ProductController::class)->except(['show']);

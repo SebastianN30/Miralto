@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { Building2, ClipboardList, ConciergeBell, CreditCard, LayoutGrid, Package, Tag, TrendingUp, UtensilsCrossed, Wallet } from 'lucide-vue-next';
+import { Building2, ChefHat, ClipboardList, ConciergeBell, CreditCard, LayoutGrid, Package, Tag, TrendingUp, Users, UtensilsCrossed, Wallet } from 'lucide-vue-next';
 import AppLogo from '@/components/AppLogo.vue';
 import NavMain from '@/components/NavMain.vue';
 import NavUser from '@/components/NavUser.vue';
@@ -17,10 +17,12 @@ import { dashboard } from '@/routes';
 import { index as cashIndex } from '@/routes/cash';
 import { index as categoriesIndex } from '@/routes/categories';
 import { index as tablesIndex } from '@/routes/tables';
+import { index as employeesIndex } from '@/routes/employees';
 import { index as suppliersIndex } from '@/routes/suppliers';
 import { index as salesIndex } from '@/routes/sales';
 import { index as ordersIndex } from '@/routes/orders';
 import { index as productsIndex } from '@/routes/products';
+import { index as kitchenIndex } from '@/routes/kitchen';
 import { index as waiterIndex } from '@/routes/waiter';
 import { index as walletsIndex } from '@/actions/App/Http/Controllers/WalletController';
 import type { NavItem } from '@/types';
@@ -52,6 +54,11 @@ const mainNavItems: NavItem[] = [
         icon: UtensilsCrossed,
     },
     {
+        title: 'Empleados',
+        href: employeesIndex(),
+        icon: Users,
+    },
+    {
         title: 'Proveedores',
         href: suppliersIndex(),
         icon: Building2,
@@ -70,6 +77,11 @@ const mainNavItems: NavItem[] = [
         title: 'Billeteras',
         href: walletsIndex().url,
         icon: CreditCard,
+    },
+    {
+        title: 'Cocina',
+        href: kitchenIndex(),
+        icon: ChefHat,
     },
     {
         title: 'Modo mesero',

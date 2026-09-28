@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
-import { ArrowLeft, CheckCircle, Clock, History, Pencil, Plus, Scissors, Trash2, XCircle } from 'lucide-vue-next';
-import { computed, ref } from 'vue';
+import { AlertTriangle, ArrowLeft, CheckCircle, Clock, History, Pencil, Plus, Printer, Scissors, Trash2, XCircle } from 'lucide-vue-next';
+import { computed, ref, watch } from 'vue';
 import * as OrderController from '@/actions/App/Http/Controllers/OrderController';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -54,8 +54,18 @@ const paymentLabels: Record<string, string> = { cash: 'Efectivo', transfer: 'Tra
 const currentStatus = computed(() => statusConfig[props.order.status]);
 const hasSplitPayment = computed(() => props.order.payment_method_2 !== null);
 
+// ── Printable receipt ───────────────────────────────────────
+const receiptSubtotal = computed(() =>
+    (props.order.items ?? []).reduce((sum, item) => sum + Number(item.subtotal), 0),
+);
+
+function printReceipt() {
+    window.print();
+}
+
 // ── Pay dialog (with optional service charge) ─────────────────
 const payDialogOpen = ref(false);
+const payConfirmStep = ref(false);
 const payProcessing = ref(false);
 const includeService = ref(false);
 const serviceMode = ref<'percentage' | 'fixed'>('percentage');
@@ -74,7 +84,15 @@ const serviceAmount = computed(() => {
     }
     return Math.round(serviceFixedAmount.value);
 });
-const grandTotal = computed(() => itemsSubtotal.value + serviceAmount.value);
+const includeTax = ref(false);
+const taxAmount = computed(() => (includeTax.value ? Math.round(itemsSubtotal.value * 0.035) : 0));
+const grandTotal = computed(() => itemsSubtotal.value + serviceAmount.value + taxAmount.value);
+
+// Reset the confirmation sub-step whenever the pay dialog closes, regardless of
+// how it closed (Cancelar, click afuera, Esc, o al terminar confirmPay).
+watch(payDialogOpen, (isOpen) => {
+    if (!isOpen) payConfirmStep.value = false;
+});
 
 function confirmPay() {
     payProcessing.value = true;
@@ -85,6 +103,7 @@ function confirmPay() {
             service_charge: includeService.value,
             service_charge_percentage: (includeService.value && serviceMode.value === 'percentage') ? servicePercentage.value : null,
             service_charge_custom_amount: (includeService.value && serviceMode.value === 'fixed') ? serviceFixedAmount.value : null,
+            tax: includeTax.value,
             payment_method: paymentMethod.value,
             payment_amount_1: grandTotal.value,
             payment_method_2: null,
@@ -221,7 +240,7 @@ function submitSplit() {
 <template>
     <Head :title="`Orden #${order.id}`" />
 
-    <div class="flex flex-col gap-6 p-4">
+    <div class="flex flex-col gap-6 p-4 print:hidden">
 
         <!-- Back + actions -->
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -244,7 +263,7 @@ function submitSplit() {
                             <DialogDescription>Revisa el total antes de registrar el pago.</DialogDescription>
                         </DialogHeader>
 
-                        <div class="space-y-4 py-1">
+                        <div v-if="!payConfirmStep" class="space-y-4 py-1">
                             <!-- Service charge toggle -->
                             <div
                                 class="rounded-lg border transition-colors"
@@ -315,6 +334,28 @@ function submitSplit() {
                                 </div>
                             </div>
 
+                            <!-- Tax toggle -->
+                            <div
+                                class="cursor-pointer rounded-lg border transition-colors"
+                                :class="includeTax ? 'border-miralto-verde bg-miralto-verde/5' : 'border-sidebar-border/70'"
+                                @click="includeTax = !includeTax"
+                            >
+                                <div class="flex items-center justify-between p-3">
+                                    <div>
+                                        <p class="text-sm font-medium">Impuesto (3.5%)</p>
+                                        <p class="text-xs text-muted-foreground">
+                                            {{ includeTax ? `+ ${formatCOP(taxAmount)}` : 'Toca para incluir' }}
+                                        </p>
+                                    </div>
+                                    <div
+                                        class="flex size-5 items-center justify-center rounded-full border-2 transition-colors"
+                                        :class="includeTax ? 'border-miralto-verde bg-miralto-verde' : 'border-muted-foreground/40'"
+                                    >
+                                        <CheckCircle v-if="includeTax" class="size-3.5 text-white" />
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- Breakdown -->
                             <div class="space-y-2 rounded-lg bg-muted/40 p-3 text-sm">
                                 <div class="flex justify-between text-muted-foreground">
@@ -324,6 +365,10 @@ function submitSplit() {
                                 <div v-if="includeService" class="flex justify-between text-miralto-marron">
                                     <span>Servicio ({{ servicePercentage }}%)</span>
                                     <span>+ {{ formatCOP(serviceAmount) }}</span>
+                                </div>
+                                <div v-if="includeTax" class="flex justify-between text-miralto-marron">
+                                    <span>Impuesto (3.5%)</span>
+                                    <span>+ {{ formatCOP(taxAmount) }}</span>
                                 </div>
                                 <div class="flex justify-between border-t border-sidebar-border/50 pt-2 font-bold">
                                     <span>Total a cobrar</span>
@@ -364,14 +409,50 @@ function submitSplit() {
                             </div>
                         </div>
 
-                        <DialogFooter>
+                        <!-- Confirmation sub-step: verify payment method before submitting -->
+                        <div v-else class="space-y-4 py-1">
+                            <div class="space-y-3 rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20">
+                                <div class="flex items-center gap-2 text-amber-800 dark:text-amber-400">
+                                    <AlertTriangle class="size-5 shrink-0" />
+                                    <p class="font-semibold">Confirmación de método de pago</p>
+                                </div>
+                                <p class="text-xs text-amber-900/80 dark:text-amber-300/80">
+                                    Verifica que el método de pago seleccionado sea el correcto antes de registrar el cobro.
+                                </p>
+                                <div class="space-y-2 rounded-md bg-white/70 p-3 text-sm dark:bg-black/20">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-muted-foreground">Método de pago</span>
+                                        <span class="text-base font-bold">{{ paymentLabels[paymentMethod] }}</span>
+                                    </div>
+                                    <div v-if="paymentMethod === 'transfer' && selectedWalletId1" class="flex items-center justify-between">
+                                        <span class="text-muted-foreground">Billetera</span>
+                                        <span class="font-medium">{{ wallets.find((w) => w.id === selectedWalletId1)?.name }}</span>
+                                    </div>
+                                    <div class="flex items-center justify-between border-t border-amber-200 pt-2 dark:border-amber-800/60">
+                                        <span class="text-muted-foreground">Total a cobrar</span>
+                                        <span class="text-lg font-bold text-miralto-verde">{{ formatCOP(grandTotal) }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <DialogFooter v-if="!payConfirmStep">
                             <Button variant="ghost" @click="payDialogOpen = false">Cancelar</Button>
+                            <Button
+                                class="bg-green-600 text-white hover:bg-green-700"
+                                @click="payConfirmStep = true"
+                            >
+                                {{ `Cobrar ${formatCOP(grandTotal)}` }}
+                            </Button>
+                        </DialogFooter>
+                        <DialogFooter v-else>
+                            <Button variant="ghost" :disabled="payProcessing" @click="payConfirmStep = false">Volver</Button>
                             <Button
                                 class="bg-green-600 text-white hover:bg-green-700"
                                 :disabled="payProcessing"
                                 @click="confirmPay"
                             >
-                                {{ payProcessing ? 'Guardando…' : `Cobrar ${formatCOP(grandTotal)}` }}
+                                {{ payProcessing ? 'Guardando…' : `Sí, cobrar ${formatCOP(grandTotal)}` }}
                             </Button>
                         </DialogFooter>
                     </DialogContent>
@@ -496,7 +577,7 @@ function submitSplit() {
                         </Button>
                     </DialogTrigger>
 
-                    <DialogContent class="sm:max-w-md">
+                    <DialogContent class="flex max-h-[90vh] flex-col sm:max-w-md">
                         <DialogHeader>
                             <DialogTitle>Dividir orden #{{ order.id }}</DialogTitle>
                             <DialogDescription>
@@ -504,7 +585,7 @@ function submitSplit() {
                             </DialogDescription>
                         </DialogHeader>
 
-                        <div class="space-y-2 py-2">
+                        <div class="min-h-0 flex-1 space-y-2 overflow-y-auto py-2">
                             <div
                                 v-for="entry in splitItems"
                                 :key="entry.order_item_id"
@@ -532,12 +613,12 @@ function submitSplit() {
                             </div>
                         </div>
 
-                        <div v-if="splitSelected.length > 0" class="rounded-lg bg-miralto-beige/50 px-3 py-2 text-sm">
+                        <div v-if="splitSelected.length > 0" class="shrink-0 rounded-lg bg-miralto-beige/50 px-3 py-2 text-sm">
                             <span class="text-muted-foreground">Total nueva orden:</span>
                             <span class="ml-2 font-bold text-miralto-verde">{{ formatCOP(splitTotal) }}</span>
                         </div>
 
-                        <DialogFooter>
+                        <DialogFooter class="shrink-0">
                             <Button variant="ghost" @click="splitOpen = false">Cancelar</Button>
                             <Button
                                 class="bg-miralto-verde text-white hover:bg-miralto-verde/90"
@@ -549,6 +630,10 @@ function submitSplit() {
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>
+
+                <Button variant="outline" class="gap-2" @click="printReceipt">
+                    <Printer class="size-4" />Imprimir
+                </Button>
 
                 <Link v-if="isAdmin || order.status !== 'paid'" :href="OrderController.edit.url({ order: order.id })">
                     <Button variant="outline" class="gap-2"><Pencil class="size-4" />Editar</Button>
@@ -654,6 +739,11 @@ function submitSplit() {
                             <dd class="text-sm font-medium">+ {{ formatCOP(order.service_charge_amount ?? 0) }}</dd>
                         </div>
 
+                        <div v-if="order.tax" class="flex items-center justify-between text-miralto-marron">
+                            <dt class="text-sm">Impuesto (3.5%)</dt>
+                            <dd class="text-sm font-medium">+ {{ formatCOP(order.tax_amount ?? 0) }}</dd>
+                        </div>
+
                         <div class="flex items-center justify-between border-t border-sidebar-border/40 pt-3">
                             <dt class="font-semibold">Total</dt>
                             <dd class="text-base font-bold text-miralto-verde">{{ formatCOP(order.total) }}</dd>
@@ -668,6 +758,10 @@ function submitSplit() {
                         <div>
                             <dt class="text-muted-foreground">Registrado por</dt>
                             <dd class="mt-0.5 font-medium">{{ order.user?.name ?? '—' }}</dd>
+                        </div>
+                        <div v-if="order.employee">
+                            <dt class="text-muted-foreground">Empleado</dt>
+                            <dd class="mt-0.5 font-medium">{{ order.employee.name }}</dd>
                         </div>
                         <div>
                             <dt class="text-muted-foreground">Fecha de creación</dt>
@@ -698,6 +792,61 @@ function submitSplit() {
                     </ol>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Printable receipt (screen: hidden, print: only this shows) -->
+    <div class="hidden print:block">
+        <div class="mx-auto max-w-xs font-mono text-sm">
+            <div class="text-center">
+                <p class="text-lg font-bold">MIRALTO</p>
+                <p>Restaurante Campestre</p>
+            </div>
+            <p class="my-2 border-t border-dashed border-black" />
+            <p>Orden #{{ order.id }}</p>
+            <p>{{ formatDate(order.created_at) }}</p>
+            <p>Mesa: {{ order.table_name ?? '—' }}</p>
+            <p>Atendido por: {{ order.user?.name ?? '—' }}</p>
+            <p class="my-2 border-t border-dashed border-black" />
+            <div v-for="item in order.items" :key="item.id" class="flex justify-between gap-2">
+                <span class="truncate">{{ item.quantity }}x {{ item.product?.name ?? 'Producto eliminado' }}</span>
+                <span class="shrink-0">{{ formatCOP(item.subtotal) }}</span>
+            </div>
+            <p class="my-2 border-t border-dashed border-black" />
+            <div class="flex justify-between">
+                <span>Subtotal</span>
+                <span>{{ formatCOP(receiptSubtotal) }}</span>
+            </div>
+            <div v-if="order.service_charge" class="flex justify-between">
+                <span>{{ order.service_charge_percentage !== null ? `Servicio (${order.service_charge_percentage}%)` : 'Propina' }}:</span>
+                <span>+ {{ formatCOP(order.service_charge_amount ?? 0) }}</span>
+            </div>
+            <div v-if="order.tax" class="flex justify-between">
+                <span>Impuesto (3.5%):</span>
+                <span>+ {{ formatCOP(order.tax_amount ?? 0) }}</span>
+            </div>
+            <p class="my-2 border-t border-dashed border-black" />
+            <div class="flex justify-between text-base font-bold">
+                <span>TOTAL</span>
+                <span>{{ formatCOP(order.total) }}</span>
+            </div>
+            <p class="my-2 border-t border-dashed border-black" />
+            <template v-if="hasSplitPayment">
+                <div class="flex justify-between">
+                    <span>{{ paymentLabels[order.payment_method!] }}</span>
+                    <span>{{ formatCOP(order.payment_amount_1!) }}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span>{{ paymentLabels[order.payment_method_2!] }}</span>
+                    <span>{{ formatCOP(order.payment_amount_2!) }}</span>
+                </div>
+            </template>
+            <div v-else class="flex justify-between">
+                <span>Método de pago</span>
+                <span>{{ order.payment_method ? paymentLabels[order.payment_method] : '—' }}</span>
+            </div>
+            <p class="my-2 border-t border-dashed border-black" />
+            <p class="text-center">¡Gracias por su visita!</p>
         </div>
     </div>
 </template>

@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'cash_register_id',
     'table_id',
     'table_name',
+    'employee_id',
     'total',
     'status',
     'payment_method',
@@ -26,12 +27,20 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'service_charge',
     'service_charge_percentage',
     'service_charge_amount',
+    'tax',
+    'tax_amount',
 ])]
 #[ObservedBy([OrderObserver::class])]
 class Order extends Model
 {
     /** @use HasFactory<OrderFactory> */
     use HasFactory;
+
+    /**
+     * Fixed tax rate applied when `tax` is enabled on an order.
+     * Keep in sync with the frontend if this value ever changes.
+     */
+    public const TAX_PERCENTAGE = 3.5;
 
     protected function casts(): array
     {
@@ -42,6 +51,8 @@ class Order extends Model
             'service_charge' => 'boolean',
             'service_charge_percentage' => 'decimal:2',
             'service_charge_amount' => 'decimal:2',
+            'tax' => 'boolean',
+            'tax_amount' => 'decimal:2',
         ];
     }
 
@@ -58,6 +69,11 @@ class Order extends Model
     public function table(): BelongsTo
     {
         return $this->belongsTo(Table::class);
+    }
+
+    public function employee(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class);
     }
 
     public function items(): HasMany
@@ -121,22 +137,35 @@ class Order extends Model
         return round((float) $this->items()->sum('subtotal') * ($pct / 100), 2);
     }
 
+    /** Computed tax amount using the fixed tax rate. */
+    public function computedTaxAmount(): float
+    {
+        return round((float) $this->items()->sum('subtotal') * (self::TAX_PERCENTAGE / 100), 2);
+    }
+
     /**
      * Recalculate and persist the order total from its items.
-     * Preserves the service charge and percentage if already applied.
+     * Preserves the service charge and tax, calculated independently over the same subtotal.
      */
     public function recalculateTotal(): void
     {
         $subtotal = (float) $this->items()->sum('subtotal');
+        $total = $subtotal;
 
         if ($this->service_charge) {
             $pct = (float) ($this->service_charge_percentage ?? 10);
             $serviceAmount = round($subtotal * ($pct / 100), 2);
             $this->service_charge_amount = $serviceAmount;
-            $this->total = round($subtotal + $serviceAmount, 2);
-        } else {
-            $this->total = $subtotal;
+            $total += $serviceAmount;
         }
+
+        if ($this->tax) {
+            $taxAmount = round($subtotal * (self::TAX_PERCENTAGE / 100), 2);
+            $this->tax_amount = $taxAmount;
+            $total += $taxAmount;
+        }
+
+        $this->total = round($total, 2);
 
         $this->save();
     }

@@ -10,9 +10,11 @@ import { index, create } from '@/routes/orders';
 
 type Props = {
     orders: PaginatedData<Order>;
+    employees: { id: number; name: string; is_active: boolean }[];
     filters: {
         status?: string;
         search?: string;
+        employee?: string;
     };
     stats: {
         total: number;
@@ -35,6 +37,7 @@ defineOptions({
 
 const search = ref(props.filters.search ?? '');
 const statusFilter = ref(props.filters.status ?? '');
+const employeeFilter = ref(props.filters.employee ?? '');
 
 let searchTimeout: ReturnType<typeof setTimeout>;
 const page = usePage();
@@ -46,11 +49,12 @@ watch(search, (val) => {
 });
 
 watch(statusFilter, () => applyFilters());
+watch(employeeFilter, () => applyFilters());
 
 function applyFilters() {
     router.get(
         OrderController.index.url(),
-        { search: search.value, status: statusFilter.value },
+        { search: search.value, status: statusFilter.value, employee: employeeFilter.value },
         { preserveState: true, replace: true },
     );
 }
@@ -173,6 +177,18 @@ const paymentLabels: Record<string, string> = {
                     <option value="paid">Pagadas</option>
                     <option value="cancelled">Canceladas</option>
                 </select>
+
+                <!-- Employee filter -->
+                <select
+                    v-model="employeeFilter"
+                    class="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none"
+                >
+                    <option value="">Todas las órdenes</option>
+                    <option value="any">Solo de empleados</option>
+                    <option v-for="e in employees" :key="e.id" :value="String(e.id)">
+                        {{ e.name }}{{ e.is_active ? '' : ' (inactivo)' }}
+                    </option>
+                </select>
             </div>
 
             <Link :href="create()">
@@ -190,6 +206,8 @@ const paymentLabels: Record<string, string> = {
                     <tr>
                         <th class="px-4 py-3 text-left font-medium text-muted-foreground">#</th>
                         <th class="px-4 py-3 text-left font-medium text-muted-foreground">Cliente</th>
+                        <th class="px-4 py-3 text-left font-medium text-muted-foreground">Mesa</th>
+                        <th class="hidden px-4 py-3 text-left font-medium text-muted-foreground md:table-cell">Empleado</th>
                         <th class="hidden px-4 py-3 text-left font-medium text-muted-foreground sm:table-cell">Productos</th>
                         <th class="px-4 py-3 text-right font-medium text-muted-foreground">Total</th>
                         <th class="px-4 py-3 text-center font-medium text-muted-foreground">Estado</th>
@@ -202,7 +220,7 @@ const paymentLabels: Record<string, string> = {
                     <tr
                         v-if="orders.data.length === 0"
                     >
-                        <td colspan="8" class="px-4 py-12 text-center text-muted-foreground">
+                        <td colspan="10" class="px-4 py-12 text-center text-muted-foreground">
                             No se encontraron órdenes.
                         </td>
                     </tr>
@@ -213,6 +231,15 @@ const paymentLabels: Record<string, string> = {
                     >
                         <td class="px-4 py-3 font-mono text-xs text-muted-foreground">#{{ order.id }}</td>
                         <td class="px-4 py-3 font-medium">{{ order.user?.name ?? '—' }}</td>
+                        <td class="px-4 py-3">{{ order.table_name ?? '—' }}</td>
+                        <td class="hidden px-4 py-3 md:table-cell">
+                            <Badge
+                                v-if="order.employee"
+                                variant="outline"
+                                class="border-miralto-marron/30 bg-miralto-marron/10 text-miralto-marron"
+                            >{{ order.employee.name }}</Badge>
+                            <span v-else class="text-muted-foreground">—</span>
+                        </td>
                         <td class="hidden px-4 py-3 text-muted-foreground sm:table-cell">
                             {{ order.items?.length ?? 0 }} ítem(s)
                         </td>

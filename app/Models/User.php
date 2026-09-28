@@ -12,7 +12,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Fortify\TwoFactorAuthenticatable;
 
-#[Fillable(['name', 'email', 'password', 'role', 'is_active'])]
+#[Fillable(['name', 'email', 'username', 'password', 'role', 'is_active'])]
 #[Hidden(['password', 'two_factor_secret', 'two_factor_recovery_codes', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -42,6 +42,26 @@ class User extends Authenticatable
     public function isEmployee(): bool
     {
         return $this->role === 'employee';
+    }
+
+    public function isWaiter(): bool
+    {
+        return $this->role === 'waiter';
+    }
+
+    public function isCook(): bool
+    {
+        return $this->role === 'cook';
+    }
+
+    /** Pantalla de inicio según el rol (mesero → /waiter, cocinero → /kitchen). */
+    public function homePath(): string
+    {
+        return match ($this->role) {
+            'waiter' => route('waiter.index', absolute: false),
+            'cook' => route('kitchen.index', absolute: false),
+            default => route('dashboard', absolute: false),
+        };
     }
 
     public function orders(): HasMany

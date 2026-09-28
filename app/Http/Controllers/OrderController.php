@@ -8,6 +8,7 @@ use App\Http\Requests\StoreOrderRequest;
 use App\Http\Requests\UpdateOrderRequest;
 use App\Models\CashRegister;
 use App\Models\Category;
+use App\Models\Employee;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
@@ -23,23 +24,33 @@ class OrderController extends Controller
 {
     public function index(Request $request): Response
     {
-        $query = Order::with(['user:id,name', 'items'])
+        $query = Order::with(['user:id,name', 'employee:id,name', 'items'])
             ->latest();
 
         if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
 
+        // 'any' = solo órdenes de empleados; un id = empleado específico
+        if ($request->filled('employee')) {
+            $request->employee === 'any'
+                ? $query->whereNotNull('employee_id')
+                : $query->where('employee_id', (int) $request->employee);
+        }
+
         if ($request->filled('search')) {
-            $query->whereHas('user', fn ($q) => $q->where('name', 'like', "%{$request->search}%"))
-                ->orWhere('id', $request->search);
+            // Agrupado para que el OR no anule los demás filtros
+            $query->where(fn ($q) => $q
+                ->whereHas('user', fn ($u) => $u->where('name', 'like', "%{$request->search}%"))
+                ->orWhere('id', $request->search));
         }
 
         $orders = $query->paginate(15)->withQueryString();
 
         return Inertia::render('orders/Index', [
             'orders' => $orders,
-            'filters' => $request->only(['status', 'search']),
+            'employees' => Employee::orderBy('name')->get(['id', 'name', 'is_active']),
+            'filters' => $request->only(['status', 'search', 'employee']),
             'stats' => [
                 'total' => Order::count(),
                 'pending' => Order::where('status', 'pending')->count(),
@@ -62,6 +73,7 @@ class OrderController extends Controller
         return Inertia::render('orders/Create', [
             'categories' => $categories,
             'tables' => $tables,
+            'employees' => Employee::active()->orderBy('name')->get(['id', 'name', 'position']),
         ]);
     }
 
@@ -79,6 +91,7 @@ class OrderController extends Controller
             'cash_register_id' => $openRegister?->id,
             'table_id' => $tableId,
             'table_name' => $tableName,
+            'employee_id' => $request->employee_id,
             'total' => 0,
             'status' => 'pending',
             'payment_method' => $request->payment_method,
@@ -113,7 +126,7 @@ class OrderController extends Controller
 
     public function show(Order $order): Response
     {
-        $order->load(['user:id,name,email', 'items.product.category', 'logs.user:id,name']);
+        $order->load(['user:id,name,email', 'employee:id,name', 'items.product.category', 'logs.user:id,name']);
 
         $categories = Category::with(['activeProducts' => fn ($q) => $q->orderBy('name')])
             ->where('is_active', true)
@@ -159,10 +172,17 @@ class OrderController extends Controller
     public function edit(Order $order): Response
     {
         $wallets = Wallet::active()->orderBy('name')->get(['id', 'name', 'type']);
+        $tables = Table::active()->orderBy('name')->get(['id', 'name', 'zone', 'capacity']);
 
         return Inertia::render('orders/Edit', [
             'order' => $order,
             'wallets' => $wallets,
+            'tables' => $tables,
+            // Activos + el asignado a esta orden (aunque ya esté inactivo)
+            'employees' => Employee::where('is_active', true)
+                ->when($order->employee_id, fn ($q) => $q->orWhere('id', $order->employee_id))
+                ->orderBy('name')
+                ->get(['id', 'name', 'position']),
         ]);
     }
 
@@ -179,6 +199,16 @@ class OrderController extends Controller
         }
 
         $data = $request->validated();
+
+        // Solo tocar la mesa si el request la trae (Show.vue también usa esta ruta)
+        if ($request->has('table_id') || $request->has('table_name')) {
+            $tableId = $data['table_id'] ?? null;
+            $data['table_id'] = $tableId;
+            $data['table_name'] = $tableId
+                ? Table::find($tableId)?->name
+                : ($data['table_name'] ?? null);
+        }
+
         $previousStatus = $order->status;
         $subtotal = (float) $order->items()->sum('subtotal');
 
@@ -193,13 +223,24 @@ class OrderController extends Controller
             }
             $data['service_charge'] = true;
             $data['service_charge_amount'] = $serviceAmount;
-            $data['total'] = round($subtotal + $serviceAmount, 2);
         } else {
             $data['service_charge'] = false;
             $data['service_charge_percentage'] = null;
             $data['service_charge_amount'] = null;
-            $data['total'] = $subtotal;
+            $serviceAmount = 0;
         }
+
+        if (! empty($data['tax'])) {
+            $taxAmount = round($subtotal * (Order::TAX_PERCENTAGE / 100), 2);
+            $data['tax'] = true;
+            $data['tax_amount'] = $taxAmount;
+        } else {
+            $data['tax'] = false;
+            $data['tax_amount'] = null;
+            $taxAmount = 0;
+        }
+
+        $data['total'] = round($subtotal + $serviceAmount + $taxAmount, 2);
 
         $walletId1 = $data['wallet_id_1'] ?? null;
         $walletId2 = $data['wallet_id_2'] ?? null;

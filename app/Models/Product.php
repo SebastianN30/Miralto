@@ -31,6 +31,11 @@ class Product extends Model
         return $this->belongsTo(Category::class);
     }
 
+    public function printer(): BelongsTo
+    {
+        return $this->belongsTo(Printer::class);
+    }
+
     public function orderItems(): HasMany
     {
         return $this->hasMany(OrderItem::class);

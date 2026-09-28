@@ -9,6 +9,21 @@ export type Table = {
     orders_count?: number;
 };
 
+export type EmployeeRole = 'waiter' | 'cook' | 'other';
+
+export type Employee = {
+    id: number;
+    name: string;
+    position: string | null;
+    role: EmployeeRole;
+    user_id: number | null;
+    user?: { id: number; username: string | null; is_active: boolean } | null;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
+    orders_count?: number;
+};
+
 export type Supplier = {
     id: number;
     name: string;
@@ -84,6 +99,7 @@ export type OrderItem = {
     price: string;
     subtotal: string;
     notes: string | null;
+    prepared_at: string | null;
     created_at: string;
     updated_at: string;
     product?: Product;
@@ -99,6 +115,8 @@ export type Order = {
     table_id: number | null;
     table_name: string | null;
     table?: Table;
+    employee_id: number | null;
+    employee?: Pick<Employee, 'id' | 'name'> | null;
     total: string;
     status: OrderStatus;
     payment_method: PaymentMethod | null;
@@ -109,6 +127,8 @@ export type Order = {
     service_charge: boolean;
     service_charge_percentage: string | null;
     service_charge_amount: string | null;
+    tax: boolean;
+    tax_amount: string | null;
     created_at: string;
     updated_at: string;
     user?: {

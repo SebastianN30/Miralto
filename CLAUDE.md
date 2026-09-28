@@ -257,15 +257,17 @@ show({ order: 1 })  // /orders/1
 |---|---|---|
 | `id` | bigIncrements | PK |
 | `name` | string | |
-| `email` | string unique | |
+| `email` | string unique | para empleados con acceso sin correo real se usa `{username}@miralto.local` (placeholder) |
+| `username` | string(50) nullable unique | login alternativo; requerido cuando el empleado tiene acceso al sistema |
 | `password` | hashed | |
-| `role` | enum(admin, employee) | default: employee |
-| `is_active` | boolean | default: true |
+| `role` | string(20) | `admin`, `employee`, `waiter`, `cook` — default: employee |
+| `is_active` | boolean | default: true — inactivo no puede iniciar sesión |
 | `two_factor_*` | columns | Fortify 2FA |
 | `remember_token` | string | |
 | `timestamps` | | |
 
-**Modelo `User`:** `isAdmin()`, `isEmployee()`, relación `orders()` hasMany.
+**Modelo `User`:** `isAdmin()`, `isEmployee()`, `isWaiter()`, `isCook()`, relación `orders()` hasMany.
+**`homePath()`:** ruta de aterrizaje tras login según `role` — `waiter` → `/waiter`, `cook` → `/kitchen`, resto → `/dashboard`. Usado por `LoginResponse` (ver login más abajo) y por el middleware de zona para redirigir cuando alguien intenta salir de su zona.
 **Factory states:** `admin()`, `inactive()`, `withTwoFactor()`
 
 ---
@@ -311,7 +313,7 @@ show({ order: 1 })  // /orders/1
 | `is_active` | boolean | default: true |
 | `timestamps` | | |
 
-Tabla preparada para el módulo de meseros (Fase futura). Los productos la referencian con `printer_id` nullable — cuando sea null, se imprime en la impresora por defecto.
+**Modelo `Printer`:** `scopeActive()`, relación `products()` hasMany. Los productos la referencian con `printer_id` nullable — cuando sea null, se imprime/agrupa en "Impresora por defecto". Usada como filtro de estación en la vista de cocina (`/kitchen`).
 
 ---
 
@@ -408,32 +410,56 @@ Generado automáticamente por el `OrderObserver` (PHP attribute `#[ObservedBy]` 
 
 ---
 
+### `employees`
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | bigIncrements | PK |
+| `name` | string(100) unique | |
+| `position` | string(100) nullable | cargo (texto libre) |
+| `role` | string(20) | `waiter` (Mesero), `cook` (Cocinero), `other` (Otro) — default: other |
+| `user_id` | FK nullable unique | → users, nullOnDelete — solo se llena si el empleado tiene acceso al sistema |
+| `is_active` | boolean | default: true |
+| `timestamps` | | |
+| índice | is_active | |
+
+**Modelo `Employee`:** `ROLES` (const, para selects), `LOGIN_ROLES = ['waiter', 'cook']` (únicos roles que pueden tener usuario/clave). `scopeActive()`, relaciones `user()` belongsTo, `orders()` hasMany.
+
+**Acceso al sistema (opcional por empleado):** en `EmployeeController::store()/update()`, si el rol es `waiter`/`cook` y se activa el toggle "Tiene acceso al sistema", se exige `username`+`password` y se crea/sincroniza un `User` (`EmployeeController::syncUser()`) con `role` igual al del empleado y `email` placeholder `{username}@miralto.local` (solo se re-deriva del username si el email actual sigue siendo el placeholder, nunca sobreescribe un correo real). Si se desactiva el toggle, el `User` vinculado se marca `is_active = false` (no se borra). Al eliminar un empleado con usuario vinculado, se borra también el `User` en la misma transacción — bloqueado si el empleado o su usuario ya registraron órdenes (pedir desactivar en vez de eliminar).
+
+---
+
 ### `orders`
 | Campo | Tipo | Notas |
 |---|---|---|
 | `id` | bigIncrements | PK |
-| `user_id` | FK | → users, restrictOnDelete |
+| `user_id` | FK | → users, restrictOnDelete (quien registró el pedido) |
 | `cash_register_id` | FK nullable | → cash_registers, nullOnDelete (caja activa al crearse) |
-| `table_name` | string(100) nullable | nombre/número de mesa (modo mesero) |
-| `total` | decimal(10,2) | calculado desde items (incluye cargo por servicio si aplica) |
+| `table_id` | FK nullable | → tables, nullOnDelete (mesa física seleccionada de la lista) |
+| `table_name` | string(100) nullable | nombre/número de mesa: texto libre ("P1", "C2") o copiado del nombre de `table_id` |
+| `employee_id` | FK nullable | → employees, nullOnDelete — la orden es de consumo de un empleado |
+| `total` | decimal(10,2) | calculado desde items (incluye cargo por servicio e impuesto si aplican) |
 | `status` | enum(pending, paid, cancelled) | default: pending |
 | `payment_method` | enum(cash, transfer, card) nullable | método principal |
 | `payment_amount_1` | decimal(10,2) nullable | monto método principal (pago dividido) |
 | `payment_method_2` | enum(cash, transfer, card) nullable | segundo método (pago dividido) |
 | `payment_amount_2` | decimal(10,2) nullable | monto segundo método |
-| `service_charge` | boolean | default: false — si se aplica cargo por servicio del 10% |
-| `service_charge_amount` | decimal(10,2) nullable | monto calculado del 10% de cargo por servicio |
 | `notes` | text nullable | observaciones |
+| `service_charge` | boolean | default: false — si se aplica cargo por servicio |
+| `service_charge_percentage` | decimal(5,2) nullable | % del cargo por servicio (editable; si es null se asume 10 en `computedServiceChargeAmount()`/`recalculateTotal()`) |
+| `service_charge_amount` | decimal(10,2) nullable | monto calculado y persistido del cargo por servicio |
+| `tax` | boolean | default: false — si se aplica el impuesto fijo (`Order::TAX_PERCENTAGE = 3.5`) |
+| `tax_amount` | decimal(10,2) nullable | monto calculado y persistido del impuesto |
 | `timestamps` | | |
 
 **Modelo `Order`:**
-- `recalculateTotal()` → suma `subtotal` de los items; si `service_charge = true`, añade `service_charge_amount` al total
-- `computedServiceChargeAmount()` → calcula 10% del subtotal de items (sin guardarlo)
+- `recalculateTotal()` → suma `subtotal` de los items; si `service_charge = true` añade `service_charge_amount` (según `service_charge_percentage`, default 10%); si `tax = true` añade `tax_amount` (`TAX_PERCENTAGE` fijo 3.5%) — ambos independientes, calculados sobre el mismo subtotal
+- `computedServiceChargeAmount()` / `computedTaxAmount()` → calculan el monto sin guardarlo (para previews en UI)
+- `isPending()` / `isPaid()` / `isCancelled()` → helpers sobre `status`
 - `hasSplitPayment()` → `payment_method_2 !== null`
 - `totalPaid()` → suma `payment_amount_1 + payment_amount_2`
 - `remainingBalance()` → diferencia entre total y lo pagado
-- Relaciones: `user()` belongsTo, `cashRegister()` belongsTo, `items()` hasMany, `logs()` hasMany (latest), `cashMovements()` hasMany.
-- Atributo `#[ObservedBy([OrderObserver::class])]` registra el observer (audit log + auto cash movements).
+- Relaciones: `user()` belongsTo, `cashRegister()` belongsTo, `table()` belongsTo, `employee()` belongsTo, `items()` hasMany, `logs()` hasMany (latest), `cashMovements()` hasMany.
+- Atributo `#[ObservedBy([OrderObserver::class])]` registra el observer (audit log + auto cash movements + descuento de stock).
 - Índices en `user_id`, `cash_register_id`, `status`, `created_at`.
 
 ---
@@ -448,6 +474,7 @@ Generado automáticamente por el `OrderObserver` (PHP attribute `#[ObservedBy]` 
 | `price` | decimal(10,2) | **snapshot** del precio al momento de venta |
 | `subtotal` | decimal(10,2) | `price * quantity` |
 | `notes` | string(500) nullable | nota del mesero por ítem (ej. "sin cebolla") |
+| `prepared_at` | timestamp nullable | marcado por cocina (`/kitchen`) cuando el ítem está listo |
 | `timestamps` | | |
 
 **Modelo `OrderItem`:** relaciones `order()` belongsTo, `product()` belongsTo. Índices en `order_id` y `product_id`.
@@ -479,6 +506,38 @@ Generado automáticamente por el `OrderObserver` (PHP attribute `#[ObservedBy]` 
 
 ---
 
+### `tables` (mesas físicas)
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | bigIncrements | PK |
+| `name` | string | nombre/número de la mesa |
+| `capacity` | unsignedInteger nullable | número de personas |
+| `zone` | string(100) nullable | zona/sección del restaurante |
+| `is_active` | boolean | default: true |
+| `timestamps` | | |
+| índice | is_active | |
+
+**Modelo `Table`:** `scopeActive()`, relación `orders()` hasMany. Selector de chips en `orders/Create`, `orders/Edit` y `waiter/Create` (con fallback de texto libre a `orders.table_name`, ver tabla `orders`).
+
+---
+
+### `suppliers`
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | bigIncrements | PK |
+| `name` | string | |
+| `contact_name` | string(150) nullable | persona de contacto |
+| `phone` | string(50) nullable | |
+| `email` | string nullable | |
+| `notes` | text nullable | |
+| `is_active` | boolean | default: true |
+| `timestamps` | | |
+| índice | is_active | |
+
+**Modelo `Supplier`:** `scopeActive()`. Sin relaciones a otras tablas todavía (catálogo informativo).
+
+---
+
 ### `wallet_transactions`
 | Campo | Tipo | Notas |
 |---|---|---|
@@ -507,7 +566,7 @@ Vista enfocada para meseros. **Layout dedicado** (`resources/js/layouts/WaiterLa
 
 ### Permisos / scope
 - Solo expone pedidos. No hay acceso a productos, caja, dashboard ni configuración desde la vista del mesero.
-- Cualquier usuario autenticado puede acceder. (Restricción por rol queda como TODO si llega el caso.)
+- Restringido por rol vía middleware de zona (ver sección de Login/Zonas más abajo): un usuario `role=waiter` **solo** puede estar en `/waiter`; admin/employee acceden igual que siempre.
 - Desde el sidebar admin existe el link "Modo mesero" (icono `ConciergeBell`) que lleva a `/waiter`.
 
 ### Comportamiento clave
@@ -525,6 +584,44 @@ Vista enfocada para meseros. **Layout dedicado** (`resources/js/layouts/WaiterLa
 - Mobile-first: tab bar inferior fija con dos accesos (Pedidos / Nuevo pedido), header con logo y logout.
 - Botones grandes (`h-12`), grid de productos 2-3 columnas, feedback táctil con `active:scale-95`.
 - El carrito en `Create.vue` es sticky bajo el header para que sea siempre visible.
+
+---
+
+## Login y zonas por rol (Mesero / Cocinero)
+
+### Registro público deshabilitado
+`Features::registration()` está comentado en `config/fortify.php` (Fortify solo registra las rutas `/register` si el feature está activo). Todos los usuarios se crean desde `/employees` (roles con acceso) o los seeders — nunca por auto-registro. El link "Regístrate" de `Login.vue` es condicional a `canRegister` (prop calculada desde el mismo feature flag), así que desaparece solo.
+
+### Login con usuario o correo
+`Fortify::authenticateUsing()` (en `FortifyServiceProvider`) busca el usuario por `email` **o** `username` (case-insensitive), valida `is_active` y la contraseña. El input del formulario (`resources/js/pages/auth/Login.vue`) es un campo de texto único ("Usuario o correo"), no un `type="email"`.
+
+### Redirección post-login por rol
+`App\Http\Responses\LoginResponse` (implementa `Laravel\Fortify\Contracts\LoginResponse`, registrado en `FortifyServiceProvider::register()`) redirige a `$user->homePath()` en vez de siempre a `/dashboard`. La ruta `/` también usa `homePath()`.
+
+### Middleware de zona (`App\Http\Middleware\EnsureZoneAccess`, alias `zone`)
+`routes/web.php` está dividido en 3 grupos: `zone:panel` (admin/employee), `zone:waiter`, `zone:kitchen`. El middleware redirige (no 403) a `homePath()` si el rol del usuario no debería estar en esa zona:
+- `waiter`/`cook` → bloqueados del panel admin, cada uno bloqueado de la zona del otro.
+- `admin`/`employee` → acceso normal a todo (incluye `/waiter` y `/kitchen` para supervisar).
+
+### Empleados con acceso — creación de usuario
+Ver sección `employees` arriba (tabla + modelo). La UI de `/employees` (`resources/js/pages/employees/Index.vue`) tiene un select de Rol y, solo si el rol es Mesero/Cocinero, un panel de "Tiene acceso al sistema" con usuario/clave.
+
+---
+
+## Módulo Cocina – `/kitchen`
+
+Vista de cola para el rol `cook`. **Layout dedicado** (`resources/js/layouts/KitchenLayout.vue`) — header simple con logo/nombre/logout, sin tab bar inferior (no hay "crear" en cocina). Registrado en `app.ts` con `name.startsWith('kitchen/') → KitchenLayout`. Acceso también desde el sidebar admin (icono `ChefHat`, "Cocina").
+
+### `KitchenController`
+- `index()`: pedidos `status=pending` con al menos un item sin `prepared_at`, con `user`/`items.product` cargados. Pasa también `stations` (impresoras activas) para el filtro.
+- `toggleItem(OrderItem $item)` (`PATCH /kitchen/items/{item}`): alterna `prepared_at` (null ↔ now) de un item suelto. Rechaza si la orden ya no está `pending`.
+- `markOrder(Order $order)` (`PATCH /kitchen/orders/{order}`): marca `prepared_at = now()` en todos los items sin preparar de la orden; si se manda `printer_id`, solo los de esa estación (permite "todo listo" por estación cuando hay un filtro activo).
+
+### `kitchen/Index.vue`
+- `usePoll(15000, { only: ['orders'] })` — refresca la cola sola cada 15s.
+- Filtro por estación (chips, basado en `printers`); `null` = todas.
+- Cada pedido es una tarjeta: mesa/#pedido, mesero, badge de minutos de espera (color según antigüedad: gris <10min, ámbar ≥10min, rojo ≥20min), checklist de items (click para alternar listo/pendiente, con nota del item en ámbar si tiene), botón "Todo listo".
+- Las tarjetas cuyo(s) item(s) de la estación filtrada ya están todos listos desaparecen de la vista (pero la orden sigue viva si tiene items de otra estación pendientes).
 
 ---
 
@@ -597,13 +694,17 @@ Array completo de 14 días (incluyendo días con `total = 0`) → renderizado co
 | `created` | Crea `OrderLog` con action=`created` |
 | `updated` con cambio de `status` | Log `status_changed` con `{from, to}` en `changes` |
 | `updated` con cambio de pago (sin cambio de status) | Log `payment_updated` con campos modificados |
-| `deleted` | Log `deleted` |
+| `deleting` | Log `deleted` |
+
+**Gotcha:** el logging de borrado usa el evento **`deleting`** (no `deleted`) porque `order_logs.order_id` tiene `cascadeOnDelete()` — crear el `OrderLog` después del DELETE físico (evento `deleted`) viola el FK y lanza `SQLSTATE[23000]` 1452.
 
 **Side effects en cambios de status:**
-- `→ paid`: crea `CashMovement` tipo `sale` (uno o dos en pago dividido) en la caja activa.
-- `paid → cancelled`: crea `CashMovement` tipo `refund` por el total.
+- `→ paid`: crea `CashMovement` tipo `sale` (uno o dos en pago dividido) en la caja activa, y descuenta stock (`adjustStock($order, -1)`).
+- `paid → cancelled`: crea `CashMovement` tipo `refund` por el total, y repone stock (`adjustStock($order, 1)`).
 
 Si no hay caja abierta cuando se debería crear un movimiento automático, el observer simplemente lo omite (no falla).
+
+**Descuento automático de stock (`adjustStock()`):** por cada `OrderItem` de la orden, hace `Product::whereKey($id)->whereNotNull('stock')->decrement/increment('stock', $qty)` — SQL atómico, sin condición de carrera. Solo afecta productos con `stock` no nulo (trackeados); se permite quedar en negativo, sin bloquear ni lanzar excepción. Solo se dispara en la transición de `status`, nunca al solo agregar ítems a una orden `pending`. `OrderController::split()` no requiere ajuste — solo mueve `OrderItem` entre órdenes, nunca toca `Product::stock` directamente.
 
 ---
 
@@ -676,12 +777,18 @@ Permite que una orden se pague con dos métodos distintos (ej. parte en efectivo
 - `payment_method_2` + `payment_amount_2` = segundo método
 - `payment_amount_2` se calcula como `total - payment_amount_1` en el frontend
 
-### Cargo por servicio (`service_charge`)
-Permite aplicar un 10% adicional sobre el subtotal de items.
-- Se activa/desactiva en el formulario de edición de la orden (`orders/Edit.vue`).
-- Al guardar con `service_charge = true`: el backend calcula `service_charge_amount = subtotal × 0.10` y `total = subtotal + service_charge_amount`.
-- Si se desactiva: `service_charge = false`, `service_charge_amount = null`, `total = subtotal`.
-- `recalculateTotal()` respeta el flag — si `service_charge = true`, recalcula e incluye el 10% automáticamente.
+### Cargo por servicio (`service_charge`) e impuesto (`tax`)
+Dos toggles independientes en el formulario de edición (`orders/Edit.vue`), calculados sobre el mismo subtotal de items:
+- **Cargo por servicio:** porcentaje configurable (`service_charge_percentage`, default 10% si es null). Al activarlo: `service_charge_amount = subtotal × pct/100`.
+- **Impuesto:** porcentaje fijo `Order::TAX_PERCENTAGE = 3.5`. Al activarlo: `tax_amount = subtotal × 0.035`.
+- Al desactivar cualquiera: su campo `*_amount` vuelve a `null` y deja de sumarse al total.
+- `recalculateTotal()` respeta ambos flags de forma independiente — `total = subtotal + (service_charge_amount si aplica) + (tax_amount si aplica)`.
+
+### Confirmación de método de pago (`orders/Show.vue`)
+El botón "Cobrar $X" no dispara el cobro directo. Muestra un sub-paso (`payConfirmStep` ref) dentro del mismo `DialogContent` (sin anidar un segundo `Dialog`, por foco/z-index): panel de confirmación con el método elegido, billetera si es `transfer`, y el total — botones "Volver" / "Sí, cobrar $X" (recién ahí llama a la ruta de pago). `watch(payDialogOpen)` resetea `payConfirmStep` al cerrar el diálogo. Motivado por errores reales de personal seleccionando mal el método de pago. **No** aplica a `Create.vue`/`Edit.vue` (flujo de pago dividido aparte).
+
+### Recibo imprimible (`orders/Show.vue`)
+Botón "Imprimir" → `window.print()`. Patrón CSS: contenido normal de la página con `print:hidden`, y un bloque hermano `hidden print:block` con el recibo ticket-style (encabezado MIRALTO, items, subtotal, servicio/impuesto si aplican, total, método de pago). **Distinto** del "módulo de impresión real" (pendiente en roadmap) — eso es envío a impresoras térmicas/red por `printer_id` para cocina/barra; esto es solo impresión de recibo vía diálogo del navegador.
 
 ### Agregar items a orden existente (`/orders/{order}/items`)
 Permite añadir productos a una orden ya guardada que siga en estado `pending`.
@@ -736,11 +843,15 @@ PATCH  /cash/{cash}/close            → CashRegisterController@close
 POST   /cash/{cash}/movements        → CashMovementController@store
 DELETE /cash/movements/{movement}    → CashMovementController@destroy (admin only, manual movs)
 
-GET    /waiter                       → WaiterController@index (lista de pedidos del día)
+GET    /waiter                       → WaiterController@index (lista de pedidos del día) — zone:waiter
 GET    /waiter/create                → WaiterController@create
 POST   /waiter                       → WaiterController@store
 GET    /waiter/{order}               → WaiterController@show (items agrupados por printer_id)
 POST   /waiter/{order}/items         → WaiterController@addItems (solo agregar, nunca quitar)
+
+GET    /kitchen                      → KitchenController@index (cola de pendientes, agrupable por estación) — zone:kitchen
+PATCH  /kitchen/items/{item}         → KitchenController@toggleItem
+PATCH  /kitchen/orders/{order}       → KitchenController@markOrder (opcional: filtra por printer_id)
 
 POST   /orders/{order}/items         → OrderController@addItems (agregar items desde admin, solo pending)
 
@@ -755,6 +866,11 @@ GET    /tables                        → TableController@index (lista con pedid
 POST   /tables                        → TableController@store (admin only)
 PATCH  /tables/{table}                → TableController@update (admin only)
 DELETE /tables/{table}                → TableController@destroy (admin only, si no tiene pedidos pendientes)
+
+GET    /employees                     → EmployeeController@index (lista con órdenes count)
+POST   /employees                     → EmployeeController@store (admin only)
+PATCH  /employees/{employee}          → EmployeeController@update (admin only)
+DELETE /employees/{employee}          → EmployeeController@destroy (admin only, bloqueado si tiene órdenes → desactivar)
 
 GET    /suppliers                     → SupplierController@index (lista con stats)
 POST   /suppliers                     → SupplierController@store (admin only)
@@ -781,6 +897,10 @@ wallets/
   Show.vue      Detalle con 4 cards (saldo actual, pagos, ingresos, egresos), filtro por tipo, tabla de transacciones, modales registrar movimiento y editar billetera
 tables/
   Index.vue     CRUD de mesas: stats (total/activas/inactivas), chip-selector de mesas con zona, diálogos crear/editar (nombre, capacidad, zona, toggle activo), guard si tiene pedidos pendientes
+employees/
+  Index.vue     CRUD de empleados (nombre, cargo, rol, activo). Rol Mesero/Cocinero puede tener acceso al sistema (usuario+clave, panel condicional). Se asocian a órdenes vía selector en Create/Edit; filtro "Solo de empleados"/por empleado en orders/Index
+kitchen/
+  Index.vue     Cola de pedidos pendientes agrupable por estación (impresora), checklist de items, "Todo listo"
 suppliers/
   Index.vue     CRUD de proveedores: stats, tabla con contacto/teléfono/correo clicables, diálogos crear/editar, toggle activo
 products/
@@ -804,6 +924,7 @@ Asignación automática por nombre de página en `resources/js/app.ts`:
 - `Welcome` → sin layout
 - `auth/*` → `AuthLayout` (split panel con branding Miralto)
 - `waiter/*` → `WaiterLayout` (mobile-first, tab bar inferior, sin sidebar admin)
+- `kitchen/*` → `KitchenLayout` (header simple, sin sidebar admin, sin tab bar)
 - `settings/*` → `AppLayout` + `SettingsLayout`
 - todo lo demás → `AppLayout` (sidebar admin + AppSidebarHeader con breadcrumbs)
 
@@ -822,11 +943,12 @@ defineOptions({
 
 ### Tipos TypeScript (`resources/js/types/`)
 - `models.ts` → `Category`, `Ingredient`, `ProductIngredient`, `Product`, `OrderItem`, `Order`, `OrderStatus`, `PaymentMethod`, `OrderLog`, `OrderLogAction`, `CashRegister`, `CashRegisterStatus`, `CashMovement`, `CashMovementType`, `Wallet`, `WalletType`, `WalletTransaction`, `WalletTransactionType`, `PaginatedData<T>`
-  - `Order` incluye `service_charge: boolean` y `service_charge_amount: string | null`
+  - `Order` incluye `table_id`, `service_charge: boolean` + `service_charge_percentage`/`service_charge_amount` (string | null), `tax: boolean` + `tax_amount: string | null`
   - `WalletType`: `'nubank' | 'daviplata' | 'nequi' | 'other'`
   - `WalletTransactionType`: `'income' | 'expense' | 'payment'`
   - `Wallet` incluye props computadas opcionales: `current_balance`, `total_inbound`, `total_outbound`
-- `auth.ts` → `User` (incluye `role: 'admin' | 'employee'`, `is_active: boolean`)
+- `auth.ts` → `User` (incluye `username: string | null`, `role: 'admin' | 'employee' | 'waiter' | 'cook'`, `is_active: boolean`)
+- `models.ts` también incluye `Employee` (`role: EmployeeRole`, `user_id`, `user?: {id, username, is_active}`) y `OrderItem.prepared_at: string | null`
 - `navigation.ts` → `BreadcrumbItem`, `NavItem`
 
 ### Componentes UI (`resources/js/components/ui/`)
@@ -842,7 +964,8 @@ Librería headless basada en Reka UI. Disponibles: `alert`, `avatar`, `badge`, `
 
 | Seeder | Datos |
 |---|---|
-| `UsersSeeder` | admin@miralto.com, carlos@miralto.com, maria@miralto.com — todos con password `password` |
+| `UsersSeeder` | admin@miralto.com (admin), empleado@miralto.com (employee), maria@miralto.com (employee) — todos con password `password` |
+| `EmployeesSeeder` | Empleados demo con acceso: `mesero` / Juan Mesero (role=waiter) y `cocina` / Ana Cocinera (role=cook), password `password`; más `Pedro Auxiliar` (role=other, sin acceso) |
 | `CategoriesSeeder` | Entradas, Platos Fuertes, Sopas y Caldos, Parrilla, Bebidas, Postres |
 | `ProductsSeeder` | 21 productos colombianos campestres (Bandeja Paisa, Trucha, Patacones, etc.) |
 | `OrdersSeeder` | 20 órdenes de prueba con 1–5 items aleatorios por orden |
@@ -855,10 +978,19 @@ Librería headless basada en Reka UI. Disponibles: `alert`, `avatar`, `badge`, `
 |---|---|
 | `tests/Feature/MiraltoModelsTest.php` | 15 tests: creación de modelos, relaciones Eloquent, soft deletes, `marginPercentage()`, `recalculateTotal()`, factory states de usuarios |
 | `tests/Feature/WalletModuleTest.php` | Módulo de billeteras: CRUD, saldo calculado, transacciones, restricciones de acceso |
+| `tests/Feature/StockDeductionTest.php` | 7 tests: descuento/reposición de stock del Observer en los 6 escenarios de cambio de status, productos no trackeados |
+| `tests/Feature/DailySalesTest.php` / `DashboardTest.php` | KPIs del dashboard, ventas por día, proyección mensual |
+| `tests/Feature/CategoryTest.php` | CRUD de categorías |
+| `tests/Feature/TableTest.php` | CRUD de mesas físicas, guard si tiene pedidos pendientes |
+| `tests/Feature/SupplierTest.php` | CRUD de proveedores |
+| `tests/Feature/EmployeeTest.php` | CRUD de empleados, asociación a órdenes, filtro por empleado en Orders/Index |
+| `tests/Feature/StaffAccessTest.php` | Login por usuario/email, redirección por rol, middleware de zona (waiter/cook/admin/employee), CRUD de acceso de empleados, cola de cocina |
+| `tests/Feature/Auth/*` | Suite estándar de Fortify (login, registro —se salta, ya deshabilitado—, reset de password, 2FA, verificación de email) |
+| `tests/Feature/Settings/*` | Actualización de perfil, seguridad (password + 2FA) |
+| `tests/Feature/ExampleTest.php` | ⚠️ Falla preexistente y no relacionada: espera `GET /` en 200, pero `/` siempre ha redirigido (login o `homePath()`). No corregir sin que Sebastian lo pida. |
 
 ```bash
 /c/laragon/bin/php/php-8.5.1/php.exe artisan test --compact tests/Feature/MiraltoModelsTest.php
-/c/laragon/bin/php/php-8.5.1/php.exe artisan test --compact tests/Feature/WalletModuleTest.php
 /c/laragon/bin/php/php-8.5.1/php.exe artisan test --compact  # todos los tests
 ```
 
@@ -874,14 +1006,23 @@ Librería headless basada en Reka UI. Disponibles: `alert`, `avatar`, `badge`, `
 | 2 | Módulo de caja (apertura/cierre, movimientos, observer de órdenes) | ✅ Completo |
 | 3 | Dashboard con KPIs (ventas hoy/semana, top/bottom productos, proyección mensual) | ✅ Completo |
 | 3 | Módulo mesero (POS móvil, mesa + notas por ítem, items agrupados por impresora) | ✅ Completo |
-| 3 | Cargo por servicio en órdenes (10% toggle, recalculo automático) | ✅ Completo |
+| 3 | Cargo por servicio en órdenes (% configurable, recalculo automático) | ✅ Completo |
 | 3 | Agregar items a orden existente desde admin (solo pending) | ✅ Completo |
 | 3 | Módulo de billeteras digitales (Nequi, Daviplata, Nubank — saldo, transacciones) | ✅ Completo |
 | 3 | Gestión de categorías (CRUD UI) | ✅ Completo |
 | 3 | Alertas de stock bajo en Dashboard + color coding en Products/Index | ✅ Completo |
 | 3 | Audit trail en reversal de billeteras (expense COR-ORD-{id}) | ✅ Completo |
+| 3 | Recibo imprimible de orden (`window.print()`, ticket-style) | ✅ Completo |
+| 3 | Descuento/reposición automática de stock al pagar/cancelar orden (Observer) | ✅ Completo |
+| 3 | Impuesto fijo configurable on/off en órdenes (`tax`/`tax_amount`, 3.5%) | ✅ Completo |
+| 3 | Confirmación de método de pago (sub-paso en `orders/Show.vue`) | ✅ Completo |
 | 4 | Mesas físicas como modelo (Table — selector en Waiter y admin Orders) | ✅ Completo |
 | 4 | Gestión de proveedores (CRUD UI) | ✅ Completo |
-| 4 | Módulo de impresión real (envío a impresoras configuradas) | Pendiente |
-| 5 | Reservas | Pendiente |
-| 6 | Nómina de empleados | Pendiente |
+| 4 | Módulo empleados (CRUD, asociar orden a empleado, filtro en Orders) | ✅ Completo |
+| 5 | Login con usuario/clave para roles Mesero/Cocinero + zonas restringidas (`/waiter`, `/kitchen`) | ✅ Completo |
+| 5 | Módulo Cocina básico (`/kitchen` — cola por estación, marcar items/orden listos) | ✅ Completo |
+| 5 | Registro público deshabilitado (`Features::registration()`, solo alta vía `/employees`/seeders) | ✅ Completo |
+| 5 | Seeder de usuarios demo Mesero/Cocinero (`EmployeesSeeder`) | ✅ Completo |
+| 5 | Módulo de impresión real (envío a impresoras configuradas) | Pendiente |
+| 6 | Reservas | Pendiente |
+| 7 | Nómina de empleados | Pendiente |

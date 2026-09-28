@@ -152,6 +152,70 @@ class MiraltoModelsTest extends TestCase
         $this->assertEquals('30000.00', $order->fresh()->total);
     }
 
+    public function test_order_computed_tax_amount(): void
+    {
+        $order = Order::factory()->create(['total' => 0]);
+        $product = Product::factory()->create(['price' => 10000]);
+
+        OrderItem::create([
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'price' => 10000,
+            'subtotal' => 10000,
+        ]);
+
+        // 3.5% of 10000 = 350
+        $this->assertEquals(350.0, $order->computedTaxAmount());
+    }
+
+    public function test_order_recalculate_total_includes_tax_amount(): void
+    {
+        $order = Order::factory()->create(['total' => 0, 'tax' => true]);
+        $product = Product::factory()->create(['price' => 10000]);
+
+        OrderItem::create([
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'price' => 10000,
+            'subtotal' => 10000,
+        ]);
+
+        $order->recalculateTotal();
+        $order->refresh();
+
+        $this->assertEquals('350.00', $order->tax_amount);
+        $this->assertEquals('10350.00', $order->total);
+    }
+
+    public function test_order_recalculate_total_with_service_charge_and_tax_together(): void
+    {
+        $order = Order::factory()->create([
+            'total' => 0,
+            'service_charge' => true,
+            'service_charge_percentage' => 10,
+            'tax' => true,
+        ]);
+        $product = Product::factory()->create(['price' => 10000]);
+
+        OrderItem::create([
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'price' => 10000,
+            'subtotal' => 10000,
+        ]);
+
+        $order->recalculateTotal();
+        $order->refresh();
+
+        // service_charge 10% = 1000, tax 3.5% = 350, both independently over the same subtotal
+        $this->assertEquals('1000.00', $order->service_charge_amount);
+        $this->assertEquals('350.00', $order->tax_amount);
+        $this->assertEquals('11350.00', $order->total);
+    }
+
     // ------------------------------------------------------------- OrderItem
 
     public function test_order_item_belongs_to_order_and_product(): void
