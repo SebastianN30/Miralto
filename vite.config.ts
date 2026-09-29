@@ -23,7 +23,7 @@ export default defineConfig({
         }),
         wayfinder({
             formVariants: true,
-            command: 'C:\\laragon\\bin\\php\\php-8.5.1\\php.exe artisan wayfinder:generate',
+            command: `${process.platform === 'win32' ? 'C:\\laragon\\bin\\php\\php-8.5.1\\php.exe' : 'php'} artisan wayfinder:generate`,
         }),
     ],
 });
