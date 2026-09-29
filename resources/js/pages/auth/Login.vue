@@ -8,7 +8,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
-import { register } from '@/routes';
 import { store } from '@/routes/login';
 import { request } from '@/routes/password';
 
@@ -96,13 +95,5 @@ defineProps<{
             <Spinner v-if="processing" />
             {{ processing ? 'Ingresando…' : 'Ingresar' }}
         </Button>
-
-        <div
-            class="text-center text-sm text-muted-foreground"
-            v-if="canRegister"
-        >
-            ¿No tienes cuenta?
-            <TextLink :href="register()" :tabindex="5" class="text-miralto-verde">Regístrate</TextLink>
-        </div>
     </Form>
 </template>
